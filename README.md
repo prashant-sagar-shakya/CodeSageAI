@@ -4,6 +4,8 @@
 
 **AI-Powered Code Review & Pull Request Analysis Platform**
 
+<img src="./CodeSageAI.png" alt="CodeSageAI Banner" width="800" style="border-radius: 12px; margin: 20px 0; box-shadow: 0 4px 30px rgba(0,0,0,0.15);" />
+
 [![Next.js](https://img.shields.io/badge/Next.js-15-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
 [![React](https://img.shields.io/badge/React-19-blue?style=for-the-badge&logo=react)](https://react.dev/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-v4-06B6D4?style=for-the-badge&logo=tailwindcss)](https://tailwindcss.com/)
