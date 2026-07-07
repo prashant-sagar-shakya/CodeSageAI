@@ -169,8 +169,8 @@ export interface DashboardStats {
 
 export interface ChartDataPoint {
   name: string;
-  value: number;
-  [key: string]: string | number;
+  value?: number;
+  [key: string]: string | number | undefined;
 }
 
 // ---- Activity Feed ----
