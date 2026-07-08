@@ -4,22 +4,19 @@ import { useState, useEffect, useRef } from 'react';
 import {
   BarChart3, TrendingUp, TrendingDown, Bug, Shield, Activity,
   CheckCircle2, AlertTriangle, GitMerge, Plus, Eye, ArrowUpRight,
-  FileBarChart, Sparkles, GitBranch, Clock
+  FileBarChart, Sparkles, GitBranch, Clock, FolderOpen, Loader2,
+  RefreshCw
 } from 'lucide-react';
 import Link from 'next/link';
-import {
-  mockDashboardStats, mockTrendData, mockRadarData,
-  mockCommonIssues, mockActivity, mockReviewHistory
-} from '@/lib/mock-data';
 import { formatDate, formatNumber, getScoreColor } from '@/lib/utils';
+import { fetchDashboardStats, fetchRepos } from '@/lib/api';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar,
-  BarChart, Bar, Cell
+  RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar
 } from 'recharts';
 
 // ---- Animated Counter ----
-function AnimCounter({ end, duration = 1500 }: { end: number; duration?: number }) {
+function AnimCounter({ end, duration = 1200 }: { end: number; duration?: number }) {
   const [count, setCount] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
   const [started, setStarted] = useState(false);
@@ -49,44 +46,6 @@ function AnimCounter({ end, duration = 1500 }: { end: number; duration?: number 
   return <div ref={ref}>{formatNumber(count)}</div>;
 }
 
-// ---- Score Ring ----
-function ScoreRing({ score, size = 120, strokeWidth = 8, label }: { score: number; size?: number; strokeWidth?: number; label: string }) {
-  const [animated, setAnimated] = useState(false);
-  const ref = useRef<SVGSVGElement>(null);
-  const radius = (size - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (animated ? (score / 100) * circumference : 0);
-
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      ([entry]) => { if (entry.isIntersecting) setTimeout(() => setAnimated(true), 200); },
-      { threshold: 0.3 }
-    );
-    if (ref.current) observer.observe(ref.current);
-    return () => observer.disconnect();
-  }, []);
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-      <svg ref={ref} width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
-        <circle cx={size / 2} cy={size / 2} r={radius} className="score-ring-bg" strokeWidth={strokeWidth} />
-        <circle
-          cx={size / 2} cy={size / 2} r={radius}
-          className="score-ring-fill"
-          strokeWidth={strokeWidth}
-          stroke={getScoreColor(score)}
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-        />
-      </svg>
-      <div style={{ position: 'relative', marginTop: -size / 2 - 14, fontSize: '24px', fontWeight: 800, height: '28px' }}>
-        {animated ? score : 0}
-      </div>
-      <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', fontWeight: 500, marginTop: '4px' }}>{label}</div>
-    </div>
-  );
-}
-
 // ---- Custom Tooltip ----
 function CustomTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ name: string; value: number; color: string }>; label?: string }) {
   if (!active || !payload) return null;
@@ -108,13 +67,193 @@ function CustomTooltip({ active, payload, label }: { active?: boolean; payload?:
   );
 }
 
-// ---- Activity Icon Map ----
-const activityIcons: Record<string, React.ElementType> = {
-  CheckCircle2, AlertTriangle, GitMerge, Plus, Shield
-};
+// ---- Custom Downward Dropdown with Search ----
+function CustomRepoDropdown({ 
+  value, 
+  onChange, 
+  repos, 
+  placeholder = "All Repositories",
+  width = "220px",
+  align = "left"
+}: { 
+  value: number | null, 
+  onChange: (id: number | null) => void, 
+  repos: any[], 
+  placeholder?: string,
+  width?: string,
+  align?: "left" | "right"
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const filtered = repos.filter(r => 
+    r.name.toLowerCase().includes(search.toLowerCase()) || 
+    r.full_name?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const selectedRepo = repos.find(r => r.id === value);
+
+  return (
+    <div ref={dropdownRef} style={{ position: 'relative', width, zIndex: isOpen ? 50 : 10 }}>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        style={{
+          width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '8px 12px', borderRadius: 'var(--radius-md)', background: 'var(--bg-card)',
+          border: '1px solid var(--border-primary)', color: 'var(--text-primary)', fontSize: '13px',
+          fontWeight: 500, cursor: 'pointer', outline: 'none', transition: 'border-color var(--transition-fast)'
+        }}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {selectedRepo ? selectedRepo.name : placeholder}
+        </span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.5, transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', marginLeft: '8px' }}>
+          <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+      </button>
+
+      {isOpen && (
+        <div className="animate-fade-up" style={{
+          position: 'absolute', top: 'calc(100% + 4px)', 
+          ...(align === 'right' ? { right: 0, minWidth: '220px' } : { left: 0, right: 0 }),
+          background: 'var(--bg-card)', border: '1px solid var(--border-primary)',
+          borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-xl)',
+          maxHeight: '260px', display: 'flex', flexDirection: 'column',
+          animationDuration: '0.15s', transformOrigin: 'top center'
+        }}>
+          <div style={{ padding: '8px', borderBottom: '1px solid var(--border-primary)' }}>
+            <input 
+              type="text" 
+              placeholder="Search..." 
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              autoFocus
+              style={{
+                width: '100%', padding: '6px 10px', borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border-primary)', background: 'var(--bg-input)',
+                color: 'var(--text-primary)', fontSize: '12px', outline: 'none'
+              }}
+            />
+          </div>
+          <div style={{ overflowY: 'auto', flex: 1, padding: '4px' }}>
+            <div 
+              onClick={() => { onChange(null); setIsOpen(false); setSearch(''); }}
+              style={{
+                padding: '8px 10px', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+                fontSize: '13px', color: !value ? 'var(--primary-500)' : 'var(--text-secondary)',
+                fontWeight: !value ? 600 : 500, background: !value ? 'rgba(99, 102, 241, 0.08)' : 'transparent',
+              }}
+              onMouseEnter={e => { if (value) e.currentTarget.style.background = 'var(--bg-tertiary)'; }}
+              onMouseLeave={e => { if (value) e.currentTarget.style.background = 'transparent'; }}
+            >
+              {placeholder}
+            </div>
+            {filtered.length === 0 ? (
+              <div style={{ padding: '8px 10px', fontSize: '12px', color: 'var(--text-tertiary)', textAlign: 'center' }}>
+                No results
+              </div>
+            ) : (
+              filtered.map(r => (
+                <div 
+                  key={r.id}
+                  onClick={() => { onChange(r.id); setIsOpen(false); setSearch(''); }}
+                  style={{
+                    padding: '8px 10px', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+                    fontSize: '13px', color: value === r.id ? 'var(--primary-500)' : 'var(--text-primary)',
+                    fontWeight: value === r.id ? 600 : 500, background: value === r.id ? 'rgba(99, 102, 241, 0.08)' : 'transparent',
+                  }}
+                  onMouseEnter={e => { if (value !== r.id) e.currentTarget.style.background = 'var(--bg-tertiary)'; }}
+                  onMouseLeave={e => { if (value !== r.id) e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function DashboardPage() {
-  const stats = mockDashboardStats;
+  const [stats, setStats] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [repos, setRepos] = useState<any[]>([]);
+  const [selectedRepo, setSelectedRepo] = useState<number | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  useEffect(() => {
+    const loadInitData = async () => {
+      try {
+        const userStr = localStorage.getItem('user');
+        const user = userStr ? JSON.parse(userStr) : null;
+        const ownerId = user?.id || 1;
+        const userRepos = await fetchRepos(ownerId);
+        setRepos(userRepos);
+      } catch (err) {
+        console.error('Failed to load repos:', err);
+      }
+    };
+    loadInitData();
+  }, []);
+
+  useEffect(() => {
+    const loadStats = async () => {
+      try {
+        setLoading(true);
+        const userStr = localStorage.getItem('user');
+        const user = userStr ? JSON.parse(userStr) : null;
+        const ownerId = user?.id || 1;
+        const data = await fetchDashboardStats(ownerId, selectedRepo || undefined);
+        setStats(data);
+      } catch (err) {
+        console.error('Failed to load dashboard stats:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadStats();
+  }, [selectedRepo, refreshKey]);
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60vh', gap: '20px' }}>
+        <Loader2 size={40} style={{ color: 'var(--primary-500)', animation: 'spin-slow 1s linear infinite' }} />
+        <h3 style={{ fontSize: '16px', fontWeight: 700 }}>Loading Dashboard...</h3>
+        <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Fetching data from your repositories.</p>
+      </div>
+    );
+  }
+
+  if (!stats) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60vh', gap: '20px', textAlign: 'center', padding: '20px' }}>
+        <Activity size={48} style={{ color: 'var(--text-tertiary)', marginBottom: '16px' }} />
+        <h3 style={{ fontSize: '18px', fontWeight: 800 }}>Backend Connection Failed</h3>
+        <p style={{ fontSize: '14px', color: 'var(--text-secondary)', maxWidth: '400px' }}>
+          Could not connect to the CodeSageAI backend. Please ensure the backend is running and you have no network issues.
+        </p>
+        <button 
+          onClick={() => window.location.reload()}
+          style={{ padding: '10px 20px', background: 'var(--gradient-primary)', color: 'white', borderRadius: 'var(--radius-md)', fontWeight: 600, border: 'none', cursor: 'pointer', marginTop: '16px' }}
+        >
+          Retry Connection
+        </button>
+      </div>
+    );
+  }
 
   const statCards = [
     {
@@ -135,14 +274,53 @@ export default function DashboardPage() {
     },
   ];
 
+  // Radar breakdown
+  const activeRadarScores = stats.scores || { security: 0, performance: 0, readability: 0, testing: 0, documentation: 0, maintainability: 0 };
+  const radarData = [
+    { subject: 'Security', score: activeRadarScores.security, fullMark: 100 },
+    { subject: 'Performance', score: activeRadarScores.performance, fullMark: 100 },
+    { subject: 'Readability', score: activeRadarScores.readability, fullMark: 100 },
+    { subject: 'Testing', score: activeRadarScores.testing, fullMark: 100 },
+    { subject: 'Docs', score: activeRadarScores.documentation, fullMark: 100 },
+    { subject: 'Maintain.', score: activeRadarScores.maintainability, fullMark: 100 },
+  ];
+
+  // Trend data mapped from history
+  const trendData = stats.reviewHistory.length > 0 
+    ? stats.reviewHistory.slice().reverse().map((r: any) => ({
+        name: r.review_type === 'commit' ? `Commit ${r.commit_hash?.slice(0, 7)}` : `PR #${r.pr_number}`,
+        overall: r.overall_score,
+      }))
+    : [{ name: 'No reviews', overall: 0 }];
+
+  // Common issues list mapped from activity/issues
+  const commonIssues = stats.commonIssues || [];
+
   return (
     <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
       {/* Header */}
-      <div style={{ marginBottom: '28px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: 800, marginBottom: '4px' }}>Dashboard</h1>
-        <p style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
-          Overview of your code review activity and repository health.
-        </p>
+      <div style={{ marginBottom: '28px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+        <div>
+          <h1 style={{ fontSize: '24px', fontWeight: 800, marginBottom: '4px' }}>Dashboard</h1>
+          <p style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>
+            Overview of your active code reviews and repository health metrics.
+          </p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <CustomRepoDropdown 
+            value={selectedRepo} 
+            onChange={setSelectedRepo} 
+            repos={repos} 
+            placeholder="All Repositories" 
+          />
+          <Link href="/dashboard/repositories" style={{
+            padding: '10px 16px', borderRadius: 'var(--radius-md)', background: 'var(--gradient-primary)',
+            color: 'white', textDecoration: 'none', fontWeight: 700, fontSize: '13px', display: 'flex',
+            alignItems: 'center', gap: '8px', boxShadow: 'var(--shadow-md)',
+          }}>
+            <Plus size={16} /> Track New Repository
+          </Link>
+        </div>
       </div>
 
       {/* Stat Cards */}
@@ -173,11 +351,10 @@ export default function DashboardPage() {
             </div>
             <div style={{
               display: 'flex', alignItems: 'center', gap: '4px', marginTop: '12px',
-              fontSize: '12px', fontWeight: 600,
-              color: stat.trend > 0 ? (stat.label === 'Bugs Detected' || stat.label === 'Security Issues' ? 'var(--color-danger)' : 'var(--color-success)') : (stat.label === 'Bugs Detected' || stat.label === 'Security Issues' ? 'var(--color-success)' : 'var(--color-danger)'),
+              fontSize: '12px', color: 'var(--text-tertiary)', fontWeight: 500,
             }}>
-              {stat.trend > 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-              {Math.abs(stat.trend)}% from last month
+              <CheckCircle2 size={13} style={{ color: 'var(--color-success)' }} />
+              Real-time PostgreSQL sync
             </div>
           </div>
         ))}
@@ -185,28 +362,20 @@ export default function DashboardPage() {
 
       {/* Charts Row */}
       <div style={{
-        display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px',
+        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(480px, 1fr))', gap: '16px', marginBottom: '24px',
       }}>
         {/* Trend Chart */}
         <div className="stat-card animate-fade-up stagger-5" style={{ padding: '20px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
             <div>
               <h3 style={{ fontSize: '15px', fontWeight: 700 }}>Score Trends</h3>
-              <p style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>Monthly score progression</p>
+              <p style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>PR scores history log</p>
             </div>
             <BarChart3 size={18} style={{ color: 'var(--text-tertiary)' }} />
           </div>
           <ResponsiveContainer width="100%" height={250}>
-            <AreaChart data={mockTrendData}>
+            <AreaChart data={trendData}>
               <defs>
-                <linearGradient id="gradSecurity" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.3} />
-                  <stop offset="100%" stopColor="#f59e0b" stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="gradPerformance" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#10b981" stopOpacity={0.3} />
-                  <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
-                </linearGradient>
                 <linearGradient id="gradOverall" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#6366f1" stopOpacity={0.3} />
                   <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
@@ -214,11 +383,9 @@ export default function DashboardPage() {
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border-primary)" />
               <XAxis dataKey="name" tick={{ fontSize: 12, fill: 'var(--text-tertiary)' }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 12, fill: 'var(--text-tertiary)' }} axisLine={false} tickLine={false} domain={[40, 100]} />
+              <YAxis tick={{ fontSize: 12, fill: 'var(--text-tertiary)' }} axisLine={false} tickLine={false} domain={[0, 100]} />
               <Tooltip content={<CustomTooltip />} />
-              <Area type="monotone" dataKey="security" stroke="#f59e0b" fill="url(#gradSecurity)" strokeWidth={2} name="Security" />
-              <Area type="monotone" dataKey="performance" stroke="#10b981" fill="url(#gradPerformance)" strokeWidth={2} name="Performance" />
-              <Area type="monotone" dataKey="overall" stroke="#6366f1" fill="url(#gradOverall)" strokeWidth={2} name="Overall" />
+              <Area type="monotone" dataKey="overall" stroke="#6366f1" fill="url(#gradOverall)" strokeWidth={2} name="Overall Score" />
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -227,13 +394,14 @@ export default function DashboardPage() {
         <div className="stat-card animate-fade-up stagger-6" style={{ padding: '20px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
             <div>
-              <h3 style={{ fontSize: '15px', fontWeight: 700 }}>Repository Health</h3>
-              <p style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>Overall score breakdown</p>
+              <h3 style={{ fontSize: '15px', fontWeight: 700 }}>{selectedRepo ? 'Repository Health' : 'System Overall Health'}</h3>
+              <p style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
+                {selectedRepo ? 'Average agent score breakdowns for this repository' : 'Average agent score breakdowns across all tracked repositories'}
+              </p>
             </div>
-            <Activity size={18} style={{ color: 'var(--text-tertiary)' }} />
           </div>
           <ResponsiveContainer width="100%" height={250}>
-            <RadarChart data={mockRadarData}>
+            <RadarChart data={radarData}>
               <PolarGrid stroke="var(--border-primary)" />
               <PolarAngleAxis dataKey="subject" tick={{ fontSize: 11, fill: 'var(--text-secondary)' }} />
               <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fontSize: 10, fill: 'var(--text-tertiary)' }} />
@@ -244,26 +412,26 @@ export default function DashboardPage() {
       </div>
 
       {/* Bottom Row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(480px, 1fr))', gap: '16px' }}>
         {/* Common Issues */}
         <div className="stat-card animate-fade-up stagger-7" style={{ padding: '20px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
             <div>
-              <h3 style={{ fontSize: '15px', fontWeight: 700 }}>Most Common Issues</h3>
-              <p style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>Top issues across all reviews</p>
+              <h3 style={{ fontSize: '15px', fontWeight: 700 }}>Diagnostics Summary</h3>
+              <p style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>Active security & bug counts</p>
             </div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {mockCommonIssues.slice(0, 6).map((issue, i) => (
+            {commonIssues.map((issue: any, i: number) => (
               <div key={i}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span className={`badge badge-${issue.severity}`} style={{ fontSize: '10px', padding: '1px 6px' }}>
-                      {issue.severity === 'critical' ? '🔴' : issue.severity === 'warning' ? '🟠' : issue.severity === 'info' ? '🟡' : '🟢'}
+                      {issue.severity === 'critical' ? '🔴' : issue.severity === 'warning' ? '🟠' : '🟢'}
                     </span>
                     <span style={{ fontSize: '13px', fontWeight: 500 }}>{issue.name}</span>
                   </div>
-                  <span style={{ fontSize: '12px', color: 'var(--text-tertiary)', fontWeight: 600 }}>{issue.count}</span>
+                  <span style={{ fontSize: '12px', color: 'var(--text-tertiary)', fontWeight: 600 }}>{issue.count} occurrences</span>
                 </div>
                 <div style={{
                   height: '4px', borderRadius: 'var(--radius-full)',
@@ -271,7 +439,7 @@ export default function DashboardPage() {
                 }}>
                   <div style={{
                     height: '100%', borderRadius: 'var(--radius-full)',
-                    background: issue.severity === 'critical' ? '#ef4444' : issue.severity === 'warning' ? '#f59e0b' : issue.severity === 'info' ? '#3b82f6' : '#10b981',
+                    background: issue.severity === 'critical' ? '#ef4444' : issue.severity === 'warning' ? '#f59e0b' : '#10b981',
                     width: `${issue.percentage}%`,
                     transition: 'width 1s ease-out',
                   }} />
@@ -285,42 +453,41 @@ export default function DashboardPage() {
         <div className="stat-card animate-fade-up stagger-8" style={{ padding: '20px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
             <div>
-              <h3 style={{ fontSize: '15px', fontWeight: 700 }}>Recent Activity</h3>
-              <p style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>Latest review events</p>
+              <h3 style={{ fontSize: '15px', fontWeight: 700 }}>Diagnostics Log</h3>
+              <p style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>Latest issues registered in database</p>
             </div>
-            <Link href="/dashboard/history" style={{
-              fontSize: '12px', fontWeight: 600, color: 'var(--primary-500)',
-              display: 'flex', alignItems: 'center', gap: '4px',
-            }}>
-              View All <ArrowUpRight size={12} />
-            </Link>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
-            {mockActivity.map((item, i) => {
-              const Icon = activityIcons[item.icon] || CheckCircle2;
-              return (
+            {stats.recentActivity.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-tertiary)', fontSize: '13px' }}>
+                No active issues recorded yet.
+              </div>
+            ) : (
+              stats.recentActivity.map((item: any, i: number) => (
                 <div key={item.id} style={{
                   display: 'flex', alignItems: 'flex-start', gap: '12px',
                   padding: '12px 0',
-                  borderBottom: i < mockActivity.length - 1 ? '1px solid var(--border-primary)' : 'none',
+                  borderBottom: i < stats.recentActivity.length - 1 ? '1px solid var(--border-primary)' : 'none',
                 }}>
                   <div style={{
                     width: '32px', height: '32px', borderRadius: 'var(--radius-full)',
-                    background: `${item.color}15`, display: 'flex',
+                    background: item.severity === 'critical' ? 'rgba(239,68,68,0.15)' : 'rgba(245,158,11,0.15)', display: 'flex',
                     alignItems: 'center', justifyContent: 'center', flexShrink: 0,
                   }}>
-                    <Icon size={14} style={{ color: item.color }} />
+                    <Bug size={14} style={{ color: item.severity === 'critical' ? '#ef4444' : '#f59e0b' }} />
                   </div>
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <p style={{ fontSize: '13px', color: 'var(--text-primary)', lineHeight: 1.5 }}>{item.message}</p>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '2px' }}>
-                      <Clock size={11} style={{ color: 'var(--text-tertiary)' }} />
-                      <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{formatDate(item.timestamp)}</span>
+                    <p style={{ fontSize: '13px', color: 'var(--text-primary)', lineHeight: 1.5, fontWeight: 600 }}>{item.title}</p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>File: {item.file}</span>
+                      <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', background: 'var(--bg-tertiary)', padding: '1px 5px', borderRadius: 'var(--radius-sm)' }}>
+                        {item.agent}
+                      </span>
                     </div>
                   </div>
                 </div>
-              );
-            })}
+              ))
+            )}
           </div>
         </div>
       </div>
@@ -330,73 +497,74 @@ export default function DashboardPage() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
           <div>
             <h3 style={{ fontSize: '15px', fontWeight: 700 }}>Recent Reviews</h3>
-            <p style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>Latest code review results</p>
+            <p style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>Latest code reviews registered in PostgreSQL</p>
           </div>
-          <Link href="/dashboard/history" style={{
-            padding: '6px 14px', borderRadius: 'var(--radius-md)',
-            border: '1px solid var(--border-primary)', fontSize: '12px', fontWeight: 600,
-            color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '4px',
-            transition: 'all var(--transition-fast)',
-          }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary-500)'; e.currentTarget.style.color = 'var(--primary-500)'; }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-primary)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
-          >
-            View All <ArrowUpRight size={12} />
-          </Link>
         </div>
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid var(--border-primary)' }}>
-                {['Repository', 'PR', 'Score', 'Issues', 'Date', 'Status'].map(h => (
-                  <th key={h} style={{
-                    padding: '10px 12px', textAlign: 'left', fontWeight: 600,
-                    color: 'var(--text-tertiary)', fontSize: '12px', textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
-                  }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {mockReviewHistory.map((review, i) => (
-                <tr key={review.id} style={{
-                  borderBottom: '1px solid var(--border-primary)',
-                  transition: 'background var(--transition-fast)',
-                  cursor: 'pointer',
-                }}
-                onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-card-hover)'; }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-                >
-                  <td style={{ padding: '12px', fontWeight: 600 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <GitBranch size={14} style={{ color: 'var(--primary-500)' }} />
-                      {review.repo}
-                    </div>
-                  </td>
-                  <td style={{ padding: '12px', color: 'var(--text-secondary)' }}>{review.pr}</td>
-                  <td style={{ padding: '12px' }}>
-                    <span style={{
-                      fontWeight: 700, color: getScoreColor(review.score),
-                    }}>{review.score}</span>
-                  </td>
-                  <td style={{ padding: '12px', color: 'var(--text-secondary)' }}>{review.issues}</td>
-                  <td style={{ padding: '12px', color: 'var(--text-tertiary)', fontSize: '12px' }}>
-                    {formatDate(review.date)}
-                  </td>
-                  <td style={{ padding: '12px' }}>
-                    <span style={{
-                      display: 'inline-flex', alignItems: 'center', gap: '4px',
-                      padding: '2px 8px', borderRadius: 'var(--radius-full)',
-                      fontSize: '11px', fontWeight: 600,
-                      background: 'rgba(16, 185, 129, 0.1)', color: '#10b981',
-                    }}>
-                      <CheckCircle2 size={11} /> Complete
-                    </span>
-                  </td>
+          {stats.reviewHistory.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-secondary)' }}>
+              <FolderOpen size={36} style={{ color: 'var(--text-tertiary)', marginBottom: '12px', margin: '0 auto 12px' }} />
+              <p style={{ fontSize: '13px', fontWeight: 600 }}>No review runs created yet</p>
+              <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '4px' }}>Track a repository and trigger a manual PR review to start gathering stats.</p>
+            </div>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border-primary)' }}>
+                  {['Repository', 'Review Target', 'Overall Score', 'Status', 'Date'].map(h => (
+                    <th key={h} style={{
+                      padding: '10px 12px', textAlign: 'left', fontWeight: 600,
+                      color: 'var(--text-tertiary)', fontSize: '12px', textTransform: 'uppercase',
+                      letterSpacing: '0.05em',
+                    }}>{h}</th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {stats.reviewHistory.map((review: any) => (
+                  <tr key={review.id} style={{
+                    borderBottom: '1px solid var(--border-primary)',
+                    transition: 'background var(--transition-fast)',
+                    cursor: 'pointer',
+                  }}
+                  onClick={() => { window.location.href = `/dashboard/review/${review.id}`; }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-card-hover)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <td style={{ padding: '12px', fontWeight: 600 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <GitBranch size={14} style={{ color: 'var(--primary-500)' }} />
+                        {review.repo_name}
+                      </div>
+                    </td>
+                    <td style={{ padding: '12px' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{review.pr_title}</span>
+                        <div style={{ display: 'flex', gap: '8px', color: 'var(--text-tertiary)' }}>
+                          <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>
+                            {review.review_type === 'commit' ? `Commit ${review.commit_hash?.slice(0, 7)}` : `PR #${review.pr_number}`}
+                          </span>
+                        </div>
+                      </div>
+                    </td>
+                    <td style={{ padding: '12px' }}>
+                      <span style={{
+                        fontWeight: 700, color: getScoreColor(review.overall_score),
+                      }}>{review.overall_score}</span>
+                    </td>
+                    <td style={{ padding: '12px' }}>
+                      <span className={`badge badge-${review.status.toLowerCase() === 'completed' ? 'success' : review.status.toLowerCase() === 'failed' ? 'critical' : 'warning'}`}>
+                        {review.status}
+                      </span>
+                    </td>
+                    <td style={{ padding: '12px', color: 'var(--text-tertiary)', fontSize: '12px' }}>
+                      {formatDate(review.created_at)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     </div>

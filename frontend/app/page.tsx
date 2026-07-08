@@ -154,7 +154,7 @@ export default function LandingPage() {
         {/* Desktop Nav */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '32px' }} className="no-print">
           <div style={{ display: 'flex', gap: '28px', alignItems: 'center' }}>
-            {['Features', 'Agents', 'Workflow', 'Pricing'].map(item => (
+            {['Features', 'Agents', 'Workflow'].map(item => (
               <a key={item} href={`#${item.toLowerCase()}`} style={{
                 fontSize: '14px', fontWeight: 500, color: 'var(--text-secondary)',
                 transition: 'color var(--transition-fast)', cursor: 'pointer',

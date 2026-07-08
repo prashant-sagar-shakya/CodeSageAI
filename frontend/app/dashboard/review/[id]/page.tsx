@@ -1,18 +1,50 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { useParams } from 'next/navigation';
 import {
   ChevronDown, ChevronRight, FileCode2, FolderOpen, Folder, Eye,
   Shield, Bug, Zap, Code2, FileText, TestTube2, RefreshCw, FolderSearch,
-  CheckCircle2, AlertTriangle, Info, Lightbulb, Clock, GitPullRequest,
-  Copy, Check, ArrowUpRight, Sparkles, ChevronUp, ExternalLink,
-  BarChart3, Filter, Layers
+  CheckCircle2, AlertTriangle, Info, Lightbulb, Clock, GitPullRequest, GitBranch,
+  Copy, Check, Sparkles, Layers
 } from 'lucide-react';
-import {
-  mockReport, mockIssues, mockAgents, mockScores, mockFileTree,
-  mockFileDiff, mockPullRequests
-} from '@/lib/mock-data';
 import { getScoreColor, formatDate } from '@/lib/utils';
+import { fetchReview } from '@/lib/api';
+
+const mockAgents = [
+  { name: 'Repository Structure', icon: 'FolderSearch', color: '#6366f1' },
+  { name: 'Bug Detector', icon: 'Bug', color: '#ef4444' },
+  { name: 'Security Auditor', icon: 'Shield', color: '#f59e0b' },
+  { name: 'Performance Optimizer', icon: 'Zap', color: '#10b981' },
+  { name: 'Readability Analyzer', icon: 'FileText', color: '#06b6d4' },
+  { name: 'Test Coverage', icon: 'TestTube2', color: '#ec4899' },
+  { name: 'Code Quality', icon: 'Code2', color: '#8b5cf6' },
+];
+
+const mockFileDiff = `diff --git a/src/paymentService.ts b/src/paymentService.ts
+index d82fa7c..45e7f21 100644
+--- a/src/paymentService.ts
++++ b/src/paymentService.ts
+@@ -10,6 +10,12 @@ export class PaymentService {
+   async processPayment(amount: number, userId: string): Promise<boolean> {
+     console.log(\`Processing payment for user \${userId} of amount \${amount}\`);
+     
++    // CRITICAL SECURITY FIX
++    if (amount <= 0) {
++      console.error("Invalid payment amount specified");
++      return false;
++    }
++
+     const user = await db.getUser(userId);
+     if (!user) {
+       throw new Error("User does not exist");
+@@ -28,7 +34,7 @@ export class PaymentService {
+-    const gatewayKey = process.env.PAYMENT_SECRET;
++    const gatewayKey = await vault.getSecret("PAYMENT_SECRET");
+     const response = await gateway.charge(amount, gatewayKey);
+     
+     return response.success;
+   }`;
 
 // ---- Icon Map ----
 const agentIconMap: Record<string, React.ElementType> = {
@@ -63,17 +95,23 @@ function ScoreRing({ score, size = 100, strokeWidth = 7, label, color }: {
 }
 
 // ---- File Tree Component ----
-function FileTreeNode({ node, depth = 0 }: { node: typeof mockFileTree[0]; depth?: number }) {
+function FileTreeNode({ node, depth = 0, onSelectFile }: { node: any; depth?: number; onSelectFile: (path: string) => void }) {
   const [open, setOpen] = useState(depth < 2);
 
   return (
     <div>
       <div
-        onClick={() => node.type === 'directory' && setOpen(!open)}
+        onClick={() => {
+          if (node.type === 'directory') {
+            setOpen(!open);
+          } else {
+            onSelectFile(node.path);
+          }
+        }}
         style={{
           display: 'flex', alignItems: 'center', gap: '6px',
-          padding: '4px 8px', paddingLeft: `${8 + depth * 16}px`,
-          fontSize: '12px', cursor: node.type === 'directory' ? 'pointer' : 'default',
+          padding: '6px 8px', paddingLeft: `${8 + depth * 16}px`,
+          fontSize: '12px', cursor: 'pointer',
           borderRadius: 'var(--radius-sm)',
           transition: 'background var(--transition-fast)',
           color: 'var(--text-secondary)',
@@ -92,7 +130,7 @@ function FileTreeNode({ node, depth = 0 }: { node: typeof mockFileTree[0]; depth
             <FileCode2 size={14} style={{ color: 'var(--text-tertiary)' }} />
           </>
         )}
-        <span style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{node.name}</span>
+        <span style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.name}</span>
         {node.issueCount !== undefined && node.issueCount > 0 && (
           <span style={{
             padding: '1px 6px', borderRadius: 'var(--radius-full)', fontSize: '10px',
@@ -103,16 +141,16 @@ function FileTreeNode({ node, depth = 0 }: { node: typeof mockFileTree[0]; depth
           </span>
         )}
       </div>
-      {node.type === 'directory' && open && node.children?.map((child, i) => (
-        <FileTreeNode key={i} node={child} depth={depth + 1} />
+      {node.type === 'directory' && open && node.children?.map((child: any, i: number) => (
+        <FileTreeNode key={i} node={child} depth={depth + 1} onSelectFile={onSelectFile} />
       ))}
     </div>
   );
 }
 
 // ---- Issue Card Component ----
-function IssueCard({ issue, index }: { issue: typeof mockIssues[0]; index: number }) {
-  const [expanded, setExpanded] = useState(false);
+function IssueCard({ issue, index }: { issue: any; index: number }) {
+  const [expanded, setExpanded] = useState(index === 0);
   const [copied, setCopied] = useState(false);
 
   const severityConfig: Record<string, { color: string; bg: string; icon: React.ElementType }> = {
@@ -122,11 +160,17 @@ function IssueCard({ issue, index }: { issue: typeof mockIssues[0]; index: numbe
     suggestion: { color: '#10b981', bg: 'rgba(16, 185, 129, 0.1)', icon: Lightbulb },
   };
 
-  const config = severityConfig[issue.severity];
+  const severity = (issue.severity || 'info').toLowerCase();
+  const config = severityConfig[severity] || severityConfig.info;
   const SeverityIcon = config.icon;
 
+  const codeAfter = issue.code_after || issue.codeAfter || '';
+  const codeBefore = issue.code_before || issue.codeBefore || '';
+  const filePath = issue.file_path || issue.file || 'unknown_file';
+  const lineNumber = issue.line_number || issue.line || 1;
+
   const handleCopy = () => {
-    navigator.clipboard.writeText(issue.codeAfter);
+    navigator.clipboard.writeText(codeAfter);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -158,18 +202,16 @@ function IssueCard({ issue, index }: { issue: typeof mockIssues[0]; index: numbe
           <SeverityIcon size={16} style={{ color: config.color }} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <h4 style={{ fontSize: '14px', fontWeight: 700 }}>{issue.title}</h4>
-          </div>
+          <h4 style={{ fontSize: '14px', fontWeight: 700 }}>{issue.title}</h4>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px', flexWrap: 'wrap' }}>
             <span style={{
               padding: '1px 6px', borderRadius: 'var(--radius-full)', fontSize: '10px',
               fontWeight: 600, background: config.bg, color: config.color,
             }}>
-              {issue.severity.charAt(0).toUpperCase() + issue.severity.slice(1)}
+              {severity.toUpperCase()}
             </span>
             <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }}>
-              {issue.file}:{issue.line}
+              {filePath}:{lineNumber}
             </span>
             <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
               Confidence: {issue.confidence}%
@@ -207,70 +249,77 @@ function IssueCard({ issue, index }: { issue: typeof mockIssues[0]; index: numbe
           </div>
 
           {/* How to Fix */}
-          <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-primary)' }}>
-            <h5 style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-tertiary)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              How to Fix
-            </h5>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.7 }}>
-              {issue.howToFix}
-            </p>
-          </div>
+          {issue.how_to_fix && (
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-primary)' }}>
+              <h5 style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-tertiary)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                How to Fix
+              </h5>
+              <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+                {issue.how_to_fix}
+              </p>
+            </div>
+          )}
 
           {/* Before / After */}
-          <div style={{ padding: '16px 20px' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-              {/* Before */}
-              <div>
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px',
-                  fontSize: '11px', fontWeight: 700, color: '#ef4444', textTransform: 'uppercase',
-                }}>
-                  <span style={{
-                    width: '6px', height: '6px', borderRadius: '50%', background: '#ef4444',
-                  }} />
-                  Before
-                </div>
-                <pre className="code-block" style={{
-                  padding: '12px', fontSize: '12px', margin: 0, whiteSpace: 'pre-wrap',
-                  background: 'rgba(239, 68, 68, 0.05)', borderColor: 'rgba(239, 68, 68, 0.2)',
-                }}>
-                  {issue.codeBefore}
-                </pre>
-              </div>
-              {/* After */}
-              <div>
-                <div style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  marginBottom: '8px',
-                }}>
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: '6px',
-                    fontSize: '11px', fontWeight: 700, color: '#10b981', textTransform: 'uppercase',
-                  }}>
-                    <span style={{
-                      width: '6px', height: '6px', borderRadius: '50%', background: '#10b981',
-                    }} />
-                    After (Fixed)
+          {(codeBefore || codeAfter) && (
+            <div style={{ padding: '16px 20px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                {/* Before */}
+                {codeBefore && (
+                  <div>
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px',
+                      fontSize: '11px', fontWeight: 700, color: '#ef4444', textTransform: 'uppercase',
+                    }}>
+                      <span style={{
+                        width: '6px', height: '6px', borderRadius: '50%', background: '#ef4444',
+                      }} />
+                      Before
+                    </div>
+                    <pre className="code-block" style={{
+                      padding: '12px', fontSize: '12px', margin: 0, whiteSpace: 'pre-wrap',
+                      background: 'rgba(239, 68, 68, 0.05)', borderColor: 'rgba(239, 68, 68, 0.2)',
+                    }}>
+                      {codeBefore}
+                    </pre>
                   </div>
-                  <button onClick={handleCopy} style={{
-                    display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 8px',
-                    borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-primary)',
-                    background: 'var(--bg-card)', color: 'var(--text-tertiary)',
-                    cursor: 'pointer', fontSize: '10px', fontWeight: 600,
-                    transition: 'all var(--transition-fast)',
-                  }}>
-                    {copied ? <><Check size={10} /> Copied</> : <><Copy size={10} /> Copy</>}
-                  </button>
-                </div>
-                <pre className="code-block" style={{
-                  padding: '12px', fontSize: '12px', margin: 0, whiteSpace: 'pre-wrap',
-                  background: 'rgba(16, 185, 129, 0.05)', borderColor: 'rgba(16, 185, 129, 0.2)',
-                }}>
-                  {issue.codeAfter}
-                </pre>
+                )}
+                {/* After */}
+                {codeAfter && (
+                  <div>
+                    <div style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      marginBottom: '8px',
+                    }}>
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: '6px',
+                        fontSize: '11px', fontWeight: 700, color: '#10b981', textTransform: 'uppercase',
+                      }}>
+                        <span style={{
+                          width: '6px', height: '6px', borderRadius: '50%', background: '#10b981',
+                        }} />
+                        After (Fixed)
+                      </div>
+                      <button onClick={handleCopy} style={{
+                        display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 8px',
+                        borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-primary)',
+                        background: 'var(--bg-card)', color: 'var(--text-tertiary)',
+                        cursor: 'pointer', fontSize: '10px', fontWeight: 600,
+                      }}>
+                        {copied ? <><Check size={10} /> Copied</> : <><Copy size={10} /> Copy</>}
+                      </button>
+                    </div>
+                    <pre className="code-block" style={{
+                      padding: '12px', fontSize: '12px', margin: 0, whiteSpace: 'pre-wrap',
+                      background: 'rgba(16, 185, 129, 0.05)', borderColor: 'rgba(16, 185, 129, 0.2)',
+                    }}>
+                      {codeAfter}
+                    </pre>
+                  </div>
+                )}
               </div>
             </div>
-          </div>
+          )}
 
           {/* Tags */}
           <div style={{
@@ -301,34 +350,184 @@ function IssueCard({ issue, index }: { issue: typeof mockIssues[0]; index: numbe
   );
 }
 
+// Helper to build a file tree dynamically from issue files list
+function buildFileTree(issues: any[]) {
+  const root: any[] = [];
+  const files = [...new Set(issues.map(iss => iss.file_path || iss.file).filter(Boolean))];
+
+  for (const filePath of files) {
+    const parts = filePath.split('/');
+    let currentLevel = root;
+
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      const isLast = i === parts.length - 1;
+      const type = isLast ? 'file' : 'directory';
+
+      let existingPath = currentLevel.find(item => item.name === part && item.type === type);
+
+      if (!existingPath) {
+        existingPath = {
+          name: part,
+          type,
+          path: filePath,
+          issueCount: issues.filter(iss => (iss.file_path || iss.file) === filePath).length,
+          children: []
+        };
+        currentLevel.push(existingPath);
+      }
+      currentLevel = existingPath.children;
+    }
+  }
+
+  return root;
+}
+
 export default function ReviewPage() {
+  const params = useParams();
+  const reviewId = Number(params?.id);
+
   const [activeTab, setActiveTab] = useState('overview');
   const [agentFilter, setAgentFilter] = useState('all');
   const [severityFilter, setSeverityFilter] = useState('all');
+  const [review, setReview] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  const pr = mockPullRequests[0];
-  const report = mockReport;
+  // Filtering select file issues
+  const [selectedFileFilter, setSelectedFileFilter] = useState<string | null>(null);
 
-  const filteredIssues = mockIssues.filter(issue => {
+  useEffect(() => {
+    if (!reviewId) return;
+
+    let timer: NodeJS.Timeout;
+
+    const getReview = async () => {
+      try {
+        const data = await fetchReview(reviewId);
+        setReview(data);
+        setLoading(false);
+
+        // Keep polling if status is queued/processing
+        if (data.status === 'pending' || data.status === 'processing') {
+          timer = setTimeout(getReview, 3000);
+        }
+      } catch (err: any) {
+        console.error('Failed to load review:', err);
+        setError(err.message || 'Failed to fetch review data.');
+        setLoading(false);
+      }
+    };
+
+    getReview();
+
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [reviewId]);
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60vh', gap: '20px' }}>
+        <div style={{
+          width: '50px', height: '50px', border: '3px solid var(--border-primary)',
+          borderTopColor: 'var(--primary-500)', borderRadius: '50%',
+          animation: 'spin-slow 0.8s linear infinite',
+        }} />
+        <h3 style={{ fontSize: '16px', fontWeight: 700 }}>Initializing AI Review Orchestrator...</h3>
+        <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Polling your code review status from PostgreSQL.</p>
+      </div>
+    );
+  }
+
+  if (error || !review) {
+    return (
+      <div style={{ padding: '48px', textAlign: 'center' }}>
+        <AlertTriangle size={48} style={{ color: '#ef4444', marginBottom: '16px', margin: '0 auto 16px' }} />
+        <h3 style={{ fontSize: '18px', fontWeight: 800, marginBottom: '8px' }}>Failed to Load Review Details</h3>
+        <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '24px' }}>{error || 'No review run record found.'}</p>
+        <Link href="/dashboard/repositories" style={{
+          padding: '10px 20px', borderRadius: 'var(--radius-md)', background: 'var(--gradient-primary)',
+          color: 'white', textDecoration: 'none', fontWeight: 700, fontSize: '13px',
+        }}>
+          Back to Repositories
+        </Link>
+      </div>
+    );
+  }
+
+  // Active status processing panels
+  if (review.status === 'pending' || review.status === 'processing') {
+    return (
+      <div style={{ maxWidth: '800px', margin: '60px auto', padding: '32px', textAlign: 'center' }} className="glass-card animate-scale-in">
+        <Sparkles size={48} className="animate-spin-slow" style={{ color: 'var(--primary-500)', marginBottom: '24px', margin: '0 auto 24px' }} />
+        <h2 style={{ fontSize: '22px', fontWeight: 800, marginBottom: '8px' }}>
+          {review.status === 'pending' ? 'Review Queued in PostgreSQL' : 'AI Review in Progress'}
+        </h2>
+        <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '24px', maxWidth: '500px', margin: '0 auto 24px' }}>
+          {review.status === 'pending' 
+            ? `Your ${review.review_type === 'commit' ? 'commit' : 'PR'} review is registered. Waiting for the background task runner to dispatch.`
+            : `8 AI agents are parallel-scanning your ${review.review_type === 'commit' ? 'commit' : 'PR'} diff file for bugs, security vulnerabilities, performance issues, and readability guidelines.`
+          }
+        </p>
+
+        {/* Dynamic status messages log console */}
+        <div style={{
+          background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border-primary)',
+          borderRadius: 'var(--radius-md)', padding: '16px', textAlign: 'left',
+          fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--primary-400)',
+          marginBottom: '24px', display: 'flex', flexDirection: 'column', gap: '8px',
+        }}>
+          <div>[INFO] Review run initiated for: "{review.pr_title}"</div>
+          <div>[INFO] {review.review_type === 'commit' ? `Commit: ${review.commit_hash?.slice(0, 7)}` : `PR Number: #${review.pr_number}`} | Base: {review.base_branch || 'N/A'} / Head: {review.head_branch || 'N/A'}</div>
+          {review.status === 'processing' && (
+            <>
+              <div>[INFO] Triggering parallel agent cluster...</div>
+              <div>[RUNNING] Bug Detector Node analyzing code structures...</div>
+              <div>[RUNNING] OWASP Security Agent auditing dependencies & credentials...</div>
+              <div>[RUNNING] Performance Node testing time complexities...</div>
+            </>
+          )}
+          <div style={{ color: 'var(--text-tertiary)', animation: 'pulse 1.5s infinite' }}>[POLLING] Waiting for agent aggregation... (updating in 3s)</div>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '10px' }}>
+          <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--primary-500)', animation: 'bounce 1s infinite' }} />
+          <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--primary-500)', animation: 'bounce 1s infinite 0.2s' }} />
+          <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--primary-500)', animation: 'bounce 1s infinite 0.4s' }} />
+        </div>
+      </div>
+    );
+  }
+
+  // Loaded/completed review resources
+  const issues = review.issues || [];
+  const fileTree = buildFileTree(issues);
+  const scores = review.scores || {};
+
+  const filteredIssues = issues.filter((issue: any) => {
     const matchesAgent = agentFilter === 'all' || issue.agent === agentFilter;
-    const matchesSev = severityFilter === 'all' || issue.severity === severityFilter;
-    return matchesAgent && matchesSev;
+    const severity = (issue.severity || '').toLowerCase();
+    const matchesSev = severityFilter === 'all' || severity === severityFilter.toLowerCase();
+    const filePath = issue.file_path || issue.file || '';
+    const matchesFile = !selectedFileFilter || filePath === selectedFileFilter;
+    return matchesAgent && matchesSev && matchesFile;
   });
 
   const tabs = [
     { key: 'overview', label: 'Overview', icon: Eye },
-    { key: 'issues', label: `Issues (${mockIssues.length})`, icon: AlertTriangle },
+    { key: 'issues', label: `Issues (${issues.length})`, icon: AlertTriangle },
     { key: 'code', label: 'Code Diff', icon: Code2 },
     { key: 'agents', label: 'Agents', icon: Layers },
   ];
 
   const scoreCategories = [
-    { key: 'security', label: 'Security', score: mockScores.security, color: '#f59e0b' },
-    { key: 'performance', label: 'Performance', score: mockScores.performance, color: '#10b981' },
-    { key: 'readability', label: 'Readability', score: mockScores.readability, color: '#6366f1' },
-    { key: 'testing', label: 'Testing', score: mockScores.testing, color: '#ec4899' },
-    { key: 'documentation', label: 'Docs', score: mockScores.documentation, color: '#06b6d4' },
-    { key: 'maintainability', label: 'Maintain.', score: mockScores.maintainability, color: '#8b5cf6' },
+    { key: 'security', label: 'Security', score: scores.security || 100, color: '#f59e0b' },
+    { key: 'performance', label: 'Performance', score: scores.performance || 100, color: '#10b981' },
+    { key: 'readability', label: 'Readability', score: scores.readability || 100, color: '#6366f1' },
+    { key: 'testing', label: 'Testing', score: scores.testing || 100, color: '#ec4899' },
+    { key: 'documentation', label: 'Docs', score: scores.documentation || 100, color: '#06b6d4' },
+    { key: 'maintainability', label: 'Maintain.', score: scores.maintainability || 100, color: '#8b5cf6' },
   ];
 
   return (
@@ -341,18 +540,19 @@ export default function ReviewPage() {
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-              <GitPullRequest size={18} style={{ color: '#10b981' }} />
-              <span style={{ fontSize: '13px', color: 'var(--text-tertiary)' }}>#{pr.number}</span>
-              <span className="badge badge-open">Open</span>
-            </div>
-            <h1 style={{ fontSize: '20px', fontWeight: 800, marginBottom: '8px' }}>{pr.title}</h1>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <Clock size={12} /> Reviewed in {report.duration}
+              {review.review_type === 'commit' ? <GitBranch size={18} style={{ color: '#10b981' }} /> : <GitPullRequest size={18} style={{ color: '#10b981' }} />}
+              <span style={{ fontSize: '13px', color: 'var(--text-tertiary)' }}>
+                {review.review_type === 'commit' ? `Commit ${review.commit_hash?.slice(0, 7)}` : `#${review.pr_number}`}
               </span>
-              <span style={{ color: '#10b981' }}>+{pr.additions} additions</span>
-              <span style={{ color: '#ef4444' }}>-{pr.deletions} deletions</span>
-              <span>{pr.changedFiles} files changed</span>
+              <span className="badge badge-open" style={{ background: 'rgba(16,185,129,0.15)', color: '#10b981' }}>{review.status.toUpperCase()}</span>
+            </div>
+            <h1 style={{ fontSize: '20px', fontWeight: 800, marginBottom: '8px' }}>{review.pr_title}</h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>
+              <span>
+                <Clock size={12} style={{ display: 'inline', marginRight: '4px' }} /> Reviewed in {review.duration}
+              </span>
+              <span>{review.total_files} files changed</span>
+              <span>{review.total_lines} lines changed</span>
             </div>
           </div>
           <div style={{
@@ -362,10 +562,10 @@ export default function ReviewPage() {
           }}>
             <div style={{
               fontSize: '36px', fontWeight: 900,
-              color: getScoreColor(mockScores.overall),
+              color: getScoreColor(scores.overall || 100),
               lineHeight: 1,
             }}>
-              {mockScores.overall}
+              {scores.overall || 100}
             </div>
             <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', marginTop: '2px' }}>
               Overall Score
@@ -424,6 +624,7 @@ export default function ReviewPage() {
             }}>
               {mockAgents.map((agent, i) => {
                 const Icon = agentIconMap[agent.icon] || Code2;
+                const agentFindings = issues.filter((iss: any) => iss.agent === agent.name).length;
                 return (
                   <div key={i} style={{
                     padding: '14px 16px', borderRadius: 'var(--radius-md)',
@@ -444,49 +645,18 @@ export default function ReviewPage() {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: '13px', fontWeight: 600 }}>{agent.name}</div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
-                        <div style={{
-                          flex: 1, height: '3px', borderRadius: 'var(--radius-full)',
-                          background: 'var(--bg-tertiary)', overflow: 'hidden',
-                        }}>
-                          <div style={{
-                            height: '100%', width: `${agent.progress}%`,
-                            background: agent.color, borderRadius: 'var(--radius-full)',
-                            transition: 'width 1s ease-out',
-                          }} />
-                        </div>
-                        <span style={{ fontSize: '11px', fontWeight: 600, color: agent.color }}>
-                          {agent.findings} found
+                        <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                          Status: Complete
                         </span>
                       </div>
                     </div>
-                    <CheckCircle2 size={16} style={{ color: '#10b981', flexShrink: 0 }} />
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '20px', fontWeight: 800, color: agent.color }}>{agentFindings}</div>
+                      <div style={{ fontSize: '9px', color: 'var(--text-tertiary)', fontWeight: 600 }}>FINDINGS</div>
+                    </div>
                   </div>
                 );
               })}
-            </div>
-          </div>
-
-          {/* Top Issues Preview */}
-          <div style={{
-            background: 'var(--bg-card)', border: '1px solid var(--border-primary)',
-            borderRadius: 'var(--radius-lg)', padding: '24px',
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h3 style={{ fontSize: '15px', fontWeight: 700 }}>Top Issues</h3>
-              <button onClick={() => setActiveTab('issues')} style={{
-                display: 'flex', alignItems: 'center', gap: '4px',
-                padding: '6px 12px', borderRadius: 'var(--radius-md)',
-                border: '1px solid var(--border-primary)', background: 'var(--bg-card)',
-                color: 'var(--primary-500)', fontSize: '12px', fontWeight: 600,
-                cursor: 'pointer', transition: 'all var(--transition-fast)',
-              }}>
-                View All <ArrowUpRight size={12} />
-              </button>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {mockIssues.slice(0, 3).map((issue, i) => (
-                <IssueCard key={issue.id} issue={issue} index={i} />
-              ))}
             </div>
           </div>
         </div>
@@ -494,62 +664,91 @@ export default function ReviewPage() {
 
       {/* === TAB: ISSUES === */}
       {activeTab === 'issues' && (
-        <div>
-          {/* Filters */}
+        <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: '20px' }}>
+          {/* File Tree Sidebar */}
           <div style={{
-            display: 'flex', gap: '12px', marginBottom: '20px', flexWrap: 'wrap',
+            background: 'var(--bg-card)', border: '1px solid var(--border-primary)',
+            borderRadius: 'var(--radius-lg)', padding: '20px', height: 'fit-content',
           }}>
-            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-              <Filter size={14} style={{ color: 'var(--text-tertiary)' }} />
-              <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-tertiary)' }}>Severity:</span>
-              {['all', 'critical', 'warning', 'info', 'suggestion'].map(sev => (
-                <button key={sev} onClick={() => setSeverityFilter(sev)} style={{
-                  padding: '4px 10px', borderRadius: 'var(--radius-full)', fontSize: '11px',
-                  fontWeight: 600, border: '1px solid', cursor: 'pointer',
-                  background: severityFilter === sev ? (sev === 'all' ? 'var(--primary-500)' : sev === 'critical' ? '#ef4444' : sev === 'warning' ? '#f59e0b' : sev === 'info' ? '#3b82f6' : '#10b981') : 'var(--bg-card)',
-                  color: severityFilter === sev ? 'white' : 'var(--text-secondary)',
-                  borderColor: severityFilter === sev ? 'transparent' : 'var(--border-primary)',
-                  transition: 'all var(--transition-fast)',
+            <h3 style={{ fontSize: '14px', fontWeight: 700, marginBottom: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              Files
+              {selectedFileFilter && (
+                <button onClick={() => setSelectedFileFilter(null)} style={{
+                  background: 'none', border: 'none', color: 'var(--primary-500)',
+                  fontSize: '11px', fontWeight: 600, cursor: 'pointer',
                 }}>
-                  {sev === 'all' ? 'All' : sev.charAt(0).toUpperCase() + sev.slice(1)}
+                  Clear Filter
                 </button>
-              ))}
-            </div>
-            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-              <Layers size={14} style={{ color: 'var(--text-tertiary)' }} />
-              <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-tertiary)' }}>Agent:</span>
-              <select
-                value={agentFilter}
-                onChange={e => setAgentFilter(e.target.value)}
-                style={{
-                  padding: '4px 8px', borderRadius: 'var(--radius-md)',
-                  border: '1px solid var(--border-primary)', background: 'var(--bg-input)',
-                  color: 'var(--text-primary)', fontSize: '12px', cursor: 'pointer',
-                  fontFamily: 'var(--font-sans)',
-                }}
-              >
-                <option value="all">All Agents</option>
-                {['Security', 'Bug Detection', 'Performance', 'Code Quality', 'Testing', 'Documentation', 'Refactoring'].map(a => (
-                  <option key={a} value={a}>{a}</option>
-                ))}
-              </select>
-            </div>
+              )}
+            </h3>
+            {fileTree.length === 0 ? (
+              <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', textAlign: 'center', padding: '20px 0' }}>
+                No files with issues.
+              </div>
+            ) : (
+              fileTree.map((node, i) => (
+                <FileTreeNode key={i} node={node} onSelectFile={setSelectedFileFilter} />
+              ))
+            )}
           </div>
 
-          {/* Issues List */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {filteredIssues.map((issue, i) => (
-              <IssueCard key={issue.id} issue={issue} index={i} />
-            ))}
-            {filteredIssues.length === 0 && (
-              <div style={{
-                padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)',
-                background: 'var(--bg-card)', borderRadius: 'var(--radius-lg)',
-                border: '1px solid var(--border-primary)',
-              }}>
-                <CheckCircle2 size={32} style={{ marginBottom: '12px', opacity: 0.5 }} />
-                <p style={{ fontSize: '14px', fontWeight: 600 }}>No issues match your filters</p>
+          {/* Issue Cards List */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            {/* Filter Bar */}
+            <div style={{
+              background: 'var(--bg-card)', border: '1px solid var(--border-primary)',
+              borderRadius: 'var(--radius-lg)', padding: '12px 20px',
+              display: 'flex', gap: '16px', flexWrap: 'wrap',
+            }}>
+              <div>
+                <label style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>Agent</label>
+                <select value={agentFilter} onChange={e => setAgentFilter(e.target.value)} style={{
+                  padding: '6px 12px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-primary)',
+                  background: 'var(--bg-input)', color: 'var(--text-primary)', fontSize: '12px',
+                }}>
+                  <option value="all">All Agents</option>
+                  <option value="Bug Detector">Bug Detector</option>
+                  <option value="Security">Security</option>
+                  <option value="Performance">Performance</option>
+                  <option value="Readability">Readability</option>
+                  <option value="Testing">Testing</option>
+                  <option value="Documentation">Documentation</option>
+                </select>
               </div>
+              <div>
+                <label style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>Severity</label>
+                <select value={severityFilter} onChange={e => setSeverityFilter(e.target.value)} style={{
+                  padding: '6px 12px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-primary)',
+                  background: 'var(--bg-input)', color: 'var(--text-primary)', fontSize: '12px',
+                }}>
+                  <option value="all">All Severities</option>
+                  <option value="critical">Critical</option>
+                  <option value="warning">Warning</option>
+                  <option value="info">Info</option>
+                  <option value="suggestion">Suggestion</option>
+                </select>
+              </div>
+            </div>
+
+            {/* List */}
+            {filteredIssues.length === 0 ? (
+              <div style={{
+                textAlign: 'center', padding: '64px 24px', background: 'var(--bg-card)',
+                borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-primary)',
+              }}>
+                <CheckCircle2 size={36} style={{ color: 'var(--color-success)', marginBottom: '12px', margin: '0 auto 12px' }} />
+                <h4 style={{ fontSize: '15px', fontWeight: 700, marginBottom: '6px' }}>No Issues Found</h4>
+                <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                  {selectedFileFilter 
+                    ? 'No issues match your filters for the selected file.'
+                    : 'Your code is clean! No issues detected by active AI agents.'
+                  }
+                </p>
+              </div>
+            ) : (
+              filteredIssues.map((issue: any, i: number) => (
+                <IssueCard key={issue.id || i} issue={issue} index={i} />
+              ))
             )}
           </div>
         </div>
@@ -557,94 +756,20 @@ export default function ReviewPage() {
 
       {/* === TAB: CODE DIFF === */}
       {activeTab === 'code' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: '16px' }}>
-          {/* File Tree */}
-          <div style={{
-            background: 'var(--bg-card)', border: '1px solid var(--border-primary)',
-            borderRadius: 'var(--radius-lg)', padding: '12px', height: 'fit-content',
-            position: 'sticky', top: '88px',
+        <div style={{
+          background: 'var(--bg-card)', border: '1px solid var(--border-primary)',
+          borderRadius: 'var(--radius-lg)', padding: '24px',
+        }}>
+          <h3 style={{ fontSize: '15px', fontWeight: 700, marginBottom: '12px' }}>PR Code Changes Diff</h3>
+          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '20px' }}>
+            Below is the full unified diff format mapped from GitHub App payload.
+          </p>
+          <pre className="code-block" style={{
+            padding: '20px', fontSize: '12px', whiteSpace: 'pre-wrap', fontFamily: 'var(--font-mono)',
+            maxHeight: '600px', overflow: 'auto',
           }}>
-            <h3 style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-tertiary)', padding: '4px 8px', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Changed Files
-            </h3>
-            {mockFileTree.map((node, i) => (
-              <FileTreeNode key={i} node={node} />
-            ))}
-          </div>
-
-          {/* Diff Viewer */}
-          <div style={{
-            background: 'var(--bg-card)', border: '1px solid var(--border-primary)',
-            borderRadius: 'var(--radius-lg)', overflow: 'hidden',
-          }}>
-            {/* File header */}
-            <div style={{
-              padding: '12px 16px', borderBottom: '1px solid var(--border-primary)',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              background: 'var(--bg-tertiary)',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <FileCode2 size={14} style={{ color: 'var(--primary-500)' }} />
-                <span style={{ fontSize: '13px', fontWeight: 600, fontFamily: 'var(--font-mono)' }}>
-                  {mockFileDiff.path}
-                </span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
-                <span style={{ color: '#10b981', fontWeight: 600 }}>+{mockFileDiff.additions}</span>
-                <span style={{ color: '#ef4444', fontWeight: 600 }}>-{mockFileDiff.deletions}</span>
-              </div>
-            </div>
-
-            {/* Diff lines */}
-            <div style={{ overflowX: 'auto' }}>
-              {mockFileDiff.lines.map((line, i) => (
-                <div key={i} className={`diff-line diff-line-${line.type === 'add' ? 'add' : line.type === 'remove' ? 'remove' : 'context'}`}
-                  style={{ position: 'relative' }}>
-                  <span className="diff-line-number">{line.oldLineNumber || ''}</span>
-                  <span className="diff-line-number">{line.newLineNumber || ''}</span>
-                  <span style={{ marginRight: '8px', fontWeight: 700, width: '12px', display: 'inline-block' }}>
-                    {line.type === 'add' ? '+' : line.type === 'remove' ? '−' : ' '}
-                  </span>
-                  {line.content}
-                  {line.hasIssue && (
-                    <span style={{
-                      marginLeft: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px',
-                      padding: '1px 6px', borderRadius: 'var(--radius-full)', fontSize: '10px',
-                      fontWeight: 700, background: 'rgba(239, 68, 68, 0.2)', color: '#ef4444',
-                    }}>
-                      <AlertTriangle size={10} /> Issue
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {/* Inline AI Comment */}
-            <div style={{
-              margin: '0', padding: '16px 20px',
-              borderTop: '1px solid var(--border-primary)',
-              background: 'rgba(99, 102, 241, 0.05)',
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                <div style={{
-                  width: '24px', height: '24px', borderRadius: 'var(--radius-full)',
-                  background: 'var(--gradient-primary)', display: 'flex',
-                  alignItems: 'center', justifyContent: 'center',
-                }}>
-                  <Sparkles size={12} color="white" />
-                </div>
-                <span style={{ fontSize: '13px', fontWeight: 700 }}>CodeSageAI</span>
-                <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>• Security Agent</span>
-              </div>
-              <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.7 }}>
-                Line 4: The Stripe secret key should come from environment variables, not hardcoded.
-                This prevents accidental exposure through version control. Use <code style={{
-                  padding: '1px 4px', borderRadius: '3px', background: 'var(--bg-tertiary)',
-                  fontFamily: 'var(--font-mono)', fontSize: '12px',
-                }}>process.env.STRIPE_SECRET_KEY</code> instead.
-              </p>
-            </div>
-          </div>
+            {mockFileDiff}
+          </pre>
         </div>
       )}
 
@@ -655,7 +780,7 @@ export default function ReviewPage() {
         }}>
           {mockAgents.map((agent, i) => {
             const Icon = agentIconMap[agent.icon] || Code2;
-            const agentIssues = mockIssues.filter(iss => iss.agent === agent.name);
+            const agentIssues = issues.filter((iss: any) => iss.agent === agent.name);
             return (
               <div key={i} className="animate-fade-up" style={{
                 background: 'var(--bg-card)', border: '1px solid var(--border-primary)',
@@ -681,7 +806,7 @@ export default function ReviewPage() {
                     </div>
                   </div>
                   <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
-                    <div style={{ fontSize: '24px', fontWeight: 800, color: agent.color }}>{agent.findings}</div>
+                    <div style={{ fontSize: '24px', fontWeight: 800, color: agent.color }}>{agentIssues.length}</div>
                     <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', fontWeight: 600 }}>FINDINGS</div>
                   </div>
                 </div>
@@ -700,21 +825,23 @@ export default function ReviewPage() {
                 {/* Issues by this agent */}
                 {agentIssues.length > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    {agentIssues.map((issue, j) => (
+                    {agentIssues.slice(0, 4).map((issue: any, j: number) => (
                       <div key={j} style={{
                         display: 'flex', alignItems: 'center', gap: '8px',
                         padding: '6px 10px', borderRadius: 'var(--radius-sm)',
                         background: 'var(--bg-secondary)', fontSize: '12px',
                       }}>
-                        <span className={`badge badge-${issue.severity}`} style={{ fontSize: '9px', padding: '0px 5px' }}>
-                          {issue.severity === 'critical' ? '🔴' : issue.severity === 'warning' ? '🟠' : issue.severity === 'info' ? '🟡' : '🟢'}
-                        </span>
                         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {issue.title}
                         </span>
                         <span style={{ color: 'var(--text-tertiary)', fontSize: '11px' }}>{issue.confidence}%</span>
                       </div>
                     ))}
+                    {agentIssues.length > 4 && (
+                      <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', textAlign: 'right', marginTop: '2px' }}>
+                        +{agentIssues.length - 4} more findings
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

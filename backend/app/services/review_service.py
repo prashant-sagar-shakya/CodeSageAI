@@ -33,34 +33,44 @@ class ReviewService:
             if installation_id:
                 token = await github_service.get_installation_token(installation_id)
                 
-            # 2. Fetch PR details and diff
-            pr_details = await github_service.get_pr_details(repo.full_name, review.pr_number, token)
-            diffs = await github_service.get_pr_diff(repo.full_name, review.pr_number, token)
-            
-            # Formulate structural variables for the agents
-            files_summary = (
-                f"PR Title: {pr_details.get('title')}\n"
-                f"Base Branch: {pr_details.get('base_branch')}\n"
-                f"Head Branch: {pr_details.get('head_branch')}\n"
-                f"Changed Files Count: {pr_details.get('changed_files')}"
-            )
-            
-            # Standard directory mock structure for RAG analyzer
-            repo_tree = (
-                "src/\n"
-                "  controllers/\n"
-                "    productController.ts\n"
-                "    orderController.ts\n"
-                "  services/\n"
-                "    paymentService.ts\n"
-                "    orderService.ts\n"
-                "  middleware/\n"
-                "    auth.ts\n"
-                "  config/\n"
-                "    stripe.ts\n"
-                "  utils/\n"
-                "    analytics.ts"
-            )
+            # 2. Fetch Code Details and Diff based on Review Type
+            if review.review_type == "full_codebase":
+                diffs = "Full Codebase structural and quality analysis based on repository tree."
+                files_summary = (
+                    f"Review Type: Full Codebase Scan\n"
+                    f"Repository: {repo.full_name}\n"
+                    f"Branch: {getattr(repo, 'default_branch', 'main')}"
+                )
+                branch = getattr(repo, "default_branch", "main")
+                pr_details = {"changed_files": 0, "additions": 0, "deletions": 0}
+                
+            elif review.review_type == "commit":
+                # It's a commit review
+                diffs = await github_service.get_commit_diff(repo.full_name, review.commit_hash, token)
+                files_summary = (
+                    f"Review Type: Commit\n"
+                    f"Commit Hash: {review.commit_hash}\n"
+                    f"Commit Message: {review.pr_title}\n"
+                    f"Branch: {review.head_branch}"
+                )
+                branch = review.head_branch or getattr(repo, "default_branch", "main")
+                pr_details = {"changed_files": 0, "additions": 0, "deletions": 0} # Dummy for commits without full stat API call
+                
+            else:
+                # It's a PR review
+                pr_details = await github_service.get_pr_details(repo.full_name, review.pr_number, token)
+                diffs = await github_service.get_pr_diff(repo.full_name, review.pr_number, token)
+                files_summary = (
+                    f"Review Type: Pull Request\n"
+                    f"PR Title: {pr_details.get('title')}\n"
+                    f"Base Branch: {pr_details.get('base_branch')}\n"
+                    f"Head Branch: {pr_details.get('head_branch')}\n"
+                    f"Changed Files Count: {pr_details.get('changed_files')}"
+                )
+                branch = pr_details.get("head_branch") or getattr(repo, "default_branch", "main")
+
+            # Fetch directory structure dynamically from GitHub App API
+            repo_tree = await github_service.get_repo_tree(repo.full_name, branch, token)
             
             # 3. Run parallel multi-agent analysis via orchestrator
             result = await orchestrator.run_full_review(
@@ -87,8 +97,8 @@ class ReviewService:
                 review.testing_score = scores.get("testing", 100)
                 review.documentation_score = scores.get("documentation", 100)
                 review.maintainability_score = scores.get("maintainability", 100)
-                review.total_files = pr_details.get("changed_files", 0)
-                review.total_lines = pr_details.get("additions", 0) + pr_details.get("deletions", 0)
+                review.total_files = pr_details.get("changed_files") or 0
+                review.total_lines = (pr_details.get("additions") or 0) + (pr_details.get("deletions") or 0)
                 
                 # Propagate health updates to Repository record
                 repo_rec = review.repository
@@ -99,13 +109,19 @@ class ReviewService:
                 # Create and bind individual issues
                 issues = result.get("issues", [])
                 for iss in issues:
+                    try:
+                        line_val = iss.get("line", 1)
+                        line_num = int(line_val) if line_val is not None else 1
+                    except (ValueError, TypeError):
+                        line_num = 1
+                        
                     db_issue = ReviewIssue(
-                        agent=iss.get("agent"),
+                        agent=iss.get("agent", "Unknown"),
                         severity=iss.get("severity", "info"),
                         title=iss.get("title", "Quality warning"),
                         description=iss.get("description", ""),
                         file_path=iss.get("file", "unknown"),
-                        line_number=iss.get("line", 1),
+                        line_number=line_num,
                         explanation=iss.get("explanation", ""),
                         how_to_fix=iss.get("how_to_fix", ""),
                         code_before=iss.get("code_before", ""),

@@ -6,17 +6,17 @@ import { ThemeProvider } from "@/components/layout/theme-provider";
 const inter = Inter({
   variable: "--font-inter",
   subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700", "800", "900"],
+  display: "swap",
 });
 
 const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains",
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "CodeSageAI — AI-Powered Code Review & Pull Request Analysis",
+  title: "CodeSageAI  | AI-Powered Code Review & Pull Request Analysis",
   description:
     "AI-powered platform that reviews GitHub repositories and Pull Requests with multi-agent intelligence, bug detection, security analysis, performance optimization, and human-like review comments.",
   keywords: [
@@ -41,7 +41,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" data-theme="dark" suppressHydrationWarning>
+    <html lang="en" data-theme="dark" data-scroll-behavior="smooth" suppressHydrationWarning>
       <body className={`${inter.variable} ${jetbrainsMono.variable}`}>
         <ThemeProvider>
           {children}

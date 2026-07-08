@@ -27,6 +27,26 @@ def trigger_pr_review(
     repo = db.get(Repository, repo_id)
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
+    # Check limits
+    user_id = repo.owner_id
+    from app.models.user import User
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Repository owner not found")
+        
+    from datetime import datetime
+    first_day_of_month = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    
+    statement = select(PRReview).join(Repository).where(
+        Repository.owner_id == user_id,
+        PRReview.created_at >= first_day_of_month
+    )
+    current_review_count = len(db.exec(statement).all())
+    
+    REVIEW_LIMITS = {"free": 5, "basic": 50, "pro": 999999}
+    user_tier = getattr(user, "subscription_tier", "free")
+    if current_review_count >= REVIEW_LIMITS.get(user_tier, 5):
+        raise HTTPException(status_code=403, detail=f"Monthly review limit reached for {user_tier} plan. Please upgrade to run more reviews.")
         
     # Write pending review run record
     review = PRReview(

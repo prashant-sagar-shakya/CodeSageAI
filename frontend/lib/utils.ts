@@ -11,6 +11,10 @@ export function formatNumber(num: number): string {
 }
 
 export function formatDate(dateStr: string): string {
+  // If the date string does not specify a timezone offset at the end, assume it is UTC
+  if (!/(Z|[+-]\d{2}(:\d{2})?)$/.test(dateStr)) {
+    dateStr += 'Z';
+  }
   const date = new Date(dateStr);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();

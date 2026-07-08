@@ -18,7 +18,7 @@ class Repository(SQLModel, table=True):
     open_issues: int = 0
     is_private: bool = False
     tech_stack: str = ""  # Comma separated list e.g., "Next.js, FastAPI, PostgreSQL"
-    health_score: int = 100
+    health_score: int = 0
     created_at: datetime = Field(default_factory=datetime.utcnow)
     
     # Owner relation

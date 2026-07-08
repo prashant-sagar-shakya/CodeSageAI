@@ -13,6 +13,8 @@ class User(SQLModel, table=True):
     email: Optional[str] = None
     avatar_url: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    subscription_tier: str = Field(default="free", index=True)
+    subscription_expires_at: Optional[datetime] = None
     
     # Relationships
     repositories: List["Repository"] = Relationship(back_populates="owner")

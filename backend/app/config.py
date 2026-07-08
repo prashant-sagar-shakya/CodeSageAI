@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     # Database Config (Default to SQLite for local ease, PostgreSQL ready)
     DATABASE_URL: str = Field("sqlite:///./codesage.db", validation_alias="DATABASE_URL")
     
+    # Razorpay Config
+    RAZORPAY_KEY_ID: str = ""
+    RAZORPAY_KEY_SECRET: str = ""
+    
     # Redis Config for Queue/Cache
     REDIS_URL: str = Field("redis://localhost:6379/0", validation_alias="REDIS_URL")
     

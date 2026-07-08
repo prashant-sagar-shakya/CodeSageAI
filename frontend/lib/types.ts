@@ -9,6 +9,8 @@ export interface User {
   email: string;
   avatar: string;
   githubUsername: string;
+  subscription_tier?: string;
+  subscription_expires_at?: string;
 }
 
 // ---- Repository ----

@@ -8,8 +8,10 @@ if TYPE_CHECKING:
 
 class PRReview(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    pr_number: int
-    pr_title: str
+    review_type: str = Field(default="pr") # "pr" or "commit"
+    pr_number: Optional[int] = None # Optional for commit reviews
+    commit_hash: Optional[str] = None # For push event reviews
+    pr_title: str # Can be used for commit message
     base_branch: str
     head_branch: str
     status: str = "pending"  # "pending", "processing", "completed", "failed"

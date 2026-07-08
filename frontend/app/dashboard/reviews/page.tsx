@@ -6,7 +6,7 @@ import { GitBranch, ArrowUpRight, CheckCircle2, Clock, Eye, Search, FolderOpen }
 import { getScoreColor, formatDate } from '@/lib/utils';
 import { fetchDashboardStats } from '@/lib/api';
 
-export default function HistoryPage() {
+export default function ReviewsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [history, setHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -37,8 +37,8 @@ export default function HistoryPage() {
   return (
     <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
       <div style={{ marginBottom: '24px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: 800, marginBottom: '4px' }}>Review History</h1>
-        <p style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>All past code reviews and their results from your database.</p>
+        <h1 style={{ fontSize: '24px', fontWeight: 800, marginBottom: '4px' }}>Code Reviews</h1>
+        <p style={{ fontSize: '14px', color: 'var(--text-secondary)' }}>All triggered code reviews and their results from your database.</p>
       </div>
 
       {/* Search */}
@@ -65,13 +65,13 @@ export default function HistoryPage() {
       }}>
         {loading ? (
           <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-secondary)' }}>
-            Loading review history...
+            Loading reviews...
           </div>
         ) : filtered.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--text-secondary)' }}>
             <FolderOpen size={36} style={{ color: 'var(--text-tertiary)', marginBottom: '12px', margin: '0 auto 12px' }} />
-            <h4 style={{ fontSize: '14px', fontWeight: 600 }}>No review history found</h4>
-            <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '4px' }}>Trigger an AI review run on your tracked repositories to list history logs here.</p>
+            <h4 style={{ fontSize: '14px', fontWeight: 600 }}>No reviews found</h4>
+            <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '4px' }}>Trigger an AI review run on your tracked repositories to list them here.</p>
           </div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
