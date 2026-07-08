@@ -15,6 +15,13 @@ function LoginContent() {
   const [error, setError] = useState('');
 
   useEffect(() => {
+    // If user is already logged in and we are not processing an auth callback
+    if (!code && typeof window !== 'undefined' && localStorage.getItem('user')) {
+      window.location.href = '/dashboard';
+    }
+  }, [code]);
+
+  useEffect(() => {
     if (!code) return;
 
     const authenticate = async () => {

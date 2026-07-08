@@ -15,7 +15,6 @@ const navItems = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { label: 'Repositories', href: '/dashboard/repositories', icon: GitBranch },
   { label: 'Sage Agent', href: '/dashboard/sage', icon: Bot },
-  { label: 'Reviews', href: '/dashboard/reviews', icon: SearchCode },
   { label: 'Reports', href: '/dashboard/reports', icon: FileBarChart },
   { label: 'History', href: '/dashboard/history', icon: History },
   { label: 'Pricing', href: '/dashboard/pricing', icon: CreditCard },
@@ -519,7 +518,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     { icon: Settings, label: 'Settings', href: '/dashboard/settings' },
                     { icon: LogOut, label: 'Sign Out', href: '/login' },
                   ].map((item, i) => (
-                    <Link key={i} href={item.href} onClick={() => setUserMenuOpen(false)} style={{
+                    <Link key={i} href={item.href} onClick={(e) => {
+                      if (item.label === 'Sign Out') {
+                        localStorage.removeItem('user');
+                        localStorage.removeItem('github_token');
+                      }
+                      setUserMenuOpen(false);
+                    }} style={{
                       display: 'flex', alignItems: 'center', gap: '8px',
                       padding: '8px 12px', borderRadius: 'var(--radius-sm)',
                       fontSize: '13px', fontWeight: 500, color: 'var(--text-secondary)',

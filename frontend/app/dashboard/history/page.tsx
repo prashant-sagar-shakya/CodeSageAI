@@ -81,7 +81,7 @@ export default function HistoryPage() {
                   <th key={h} style={{
                     padding: '12px 16px', textAlign: 'left', fontWeight: 600,
                     color: 'var(--text-tertiary)', fontSize: '11px', textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
+                    letterSpacing: '0.05em', minWidth: h === 'Date' ? '160px' : 'auto',
                   }}>{h}</th>
                 ))}
               </tr>

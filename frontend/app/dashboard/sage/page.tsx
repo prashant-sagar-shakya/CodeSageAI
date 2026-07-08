@@ -354,7 +354,7 @@ export default function SageAgentPage() {
                     display: 'flex', alignItems: 'center', gap: '12px', fontSize: '15px'
                   }}>
                     <Loader2 size={18} style={{ animation: 'spin-slow 1s linear infinite', color: 'var(--primary-500)' }} />
-                    <span className="shimmer" style={{ WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+                    <span className="text-shimmer">
                       Sage is thinking...
                     </span>
                   </div>

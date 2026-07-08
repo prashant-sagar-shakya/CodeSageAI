@@ -75,12 +75,13 @@ async def send_chat_message(session_id: int, req: ChatRequest, db: Session = Dep
         
         # Update session timestamp
         session.updated_at = datetime.utcnow()
-        # Basic auto-titling if it's the first message
-        if session.title == "New Chat" and len(history_msgs) <= 2:
-            try:
-                new_title = await sage_agent.generate_title(req.message)
+        # Auto-title generation based on the latest message context
+        try:
+            new_title = await sage_agent.generate_title(req.message)
+            if new_title:
                 session.title = new_title[:50]
-            except Exception:
+        except Exception:
+            if session.title == "New Chat":
                 session.title = req.message[:30] + ("..." if len(req.message) > 30 else "")
             
         db.add(session)

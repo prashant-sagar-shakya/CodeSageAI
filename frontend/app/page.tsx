@@ -166,14 +166,18 @@ export default function LandingPage() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <ThemeToggle />
-            <Link href="/login" style={{
+            <Link href={typeof window !== 'undefined' && localStorage.getItem('user') ? "/dashboard" : "/login"} style={{
               padding: '8px 20px', borderRadius: 'var(--radius-md)',
               background: 'var(--gradient-primary)', color: 'white', fontSize: '14px',
               fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px',
               transition: 'all var(--transition-fast)', boxShadow: 'var(--shadow-md)',
             }} onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = 'var(--shadow-glow)'; }}
                onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = 'var(--shadow-md)'; }}>
-              <Github size={16} /> Get Started
+              {typeof window !== 'undefined' && localStorage.getItem('user') ? (
+                <>Go to Dashboard <ArrowRight size={16} /></>
+              ) : (
+                <><Github size={16} /> Get Started</>
+              )}
             </Link>
           </div>
         </div>
@@ -237,7 +241,7 @@ export default function LandingPage() {
           <div className="animate-fade-up stagger-3" style={{
             display: 'flex', gap: '16px', justifyContent: 'center', flexWrap: 'wrap',
           }}>
-            <Link href="/login" style={{
+            <Link href={typeof window !== 'undefined' && localStorage.getItem('user') ? "/dashboard" : "/login"} style={{
               padding: '14px 32px', borderRadius: 'var(--radius-lg)',
               background: 'var(--gradient-primary)', color: 'white', fontSize: '16px',
               fontWeight: 700, display: 'flex', alignItems: 'center', gap: '10px',
@@ -245,8 +249,11 @@ export default function LandingPage() {
               cursor: 'pointer',
             }} onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px) scale(1.02)'; }}
                onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0) scale(1)'; }}>
-              <Github size={20} /> Connect GitHub — Free
-              <ArrowRight size={18} />
+              {typeof window !== 'undefined' && localStorage.getItem('user') ? (
+                <>Go to Dashboard <ArrowRight size={20} /></>
+              ) : (
+                <><Github size={20} /> Connect GitHub — Free <ArrowRight size={18} /></>
+              )}
             </Link>
             <Link href="/dashboard" style={{
               padding: '14px 32px', borderRadius: 'var(--radius-lg)',
@@ -574,7 +581,7 @@ export default function LandingPage() {
           <p style={{ fontSize: '16px', color: 'var(--text-secondary)', marginBottom: '36px', lineHeight: 1.7 }}>
             Join thousands of developers who use CodeSageAI to ship cleaner, safer, and faster code.
           </p>
-          <Link href="/dashboard" style={{
+          <Link href={typeof window !== 'undefined' && localStorage.getItem('user') ? "/dashboard" : "/login"} style={{
             display: 'inline-flex', alignItems: 'center', gap: '10px',
             padding: '16px 40px', borderRadius: 'var(--radius-lg)',
             background: 'var(--gradient-primary)', color: 'white', fontSize: '17px',
@@ -582,7 +589,7 @@ export default function LandingPage() {
             transition: 'all var(--transition-fast)', cursor: 'pointer',
           }} onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-3px) scale(1.02)'; }}
              onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0) scale(1)'; }}>
-            Start Free Review <ArrowRight size={20} />
+            {typeof window !== 'undefined' && localStorage.getItem('user') ? 'Go to Dashboard' : 'Start Free Review'} <ArrowRight size={20} />
           </Link>
         </div>
       </section>

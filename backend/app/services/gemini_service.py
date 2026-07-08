@@ -40,6 +40,22 @@ class GeminiService:
         self.api_key = settings.GEMINI_API_KEY
         # Keep client initialized for connection pooling
         self.client = httpx.AsyncClient(timeout=90.0)
+        self._semaphore = None
+        self._last_request_time = 0
+
+    async def _get_semaphore(self):
+        if self._semaphore is None:
+            # Limit to 2 concurrent requests globally
+            self._semaphore = asyncio.Semaphore(2)
+        return self._semaphore
+
+    async def _wait_for_rate_limit(self):
+        # ensure at least 2.5 seconds between requests globally (approx 24 RPM)
+        now = asyncio.get_event_loop().time()
+        time_since_last = now - self._last_request_time
+        if time_since_last < 2.5:
+            await asyncio.sleep(2.5 - time_since_last)
+        self._last_request_time = asyncio.get_event_loop().time()
 
     async def generate_json(self, prompt: str, schema: dict = None, model: str = "gemini-2.5-flash") -> list:
         """Call Gemini API requesting a structured JSON response matching schema, with retry for 429."""
@@ -53,15 +69,19 @@ class GeminiService:
         if schema:
             payload["generationConfig"]["responseSchema"] = schema
             
-        max_retries = 3
+        max_retries = 6
         base_delay = 5
+        sem = await self._get_semaphore()
         
         for attempt in range(max_retries):
             try:
-                response = await self.client.post(url, json=payload)
+                async with sem:
+                    await self._wait_for_rate_limit()
+                    response = await self.client.post(url, json=payload)
+                    
                 if response.status_code == 429:
                     if attempt < max_retries - 1:
-                        delay = base_delay * (2 ** attempt)
+                        delay = base_delay * (1.5 ** attempt)
                         logger.warning(f"Gemini API 429 Rate Limit hit. Retrying in {delay} seconds...")
                         await asyncio.sleep(delay)
                         continue
@@ -85,7 +105,9 @@ class GeminiService:
                     raise
             except Exception as e:
                 logger.error(f"Gemini API JSON generation failed: {e}")
-                raise
+                if attempt == max_retries - 1:
+                    raise
+                await asyncio.sleep(2)
                 
     async def generate_text(self, prompt: str, model: str = "gemini-2.5-flash") -> str:
         """Call Gemini API requesting raw text responses, with retry for 429."""
@@ -94,15 +116,19 @@ class GeminiService:
             "contents": [{"parts": [{"text": prompt}]}]
         }
         
-        max_retries = 3
+        max_retries = 6
         base_delay = 5
+        sem = await self._get_semaphore()
         
         for attempt in range(max_retries):
             try:
-                response = await self.client.post(url, json=payload)
+                async with sem:
+                    await self._wait_for_rate_limit()
+                    response = await self.client.post(url, json=payload)
+                    
                 if response.status_code == 429:
                     if attempt < max_retries - 1:
-                        delay = base_delay * (2 ** attempt)
+                        delay = base_delay * (1.5 ** attempt)
                         logger.warning(f"Gemini API text 429 Rate Limit hit. Retrying in {delay} seconds...")
                         await asyncio.sleep(delay)
                         continue
@@ -123,7 +149,9 @@ class GeminiService:
                     raise
             except Exception as e:
                 logger.error(f"Gemini API text generation failed: {e}")
-                raise
+                if attempt == max_retries - 1:
+                    raise
+                await asyncio.sleep(2)
                 
     async def close(self):
         await self.client.aclose()
