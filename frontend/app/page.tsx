@@ -53,9 +53,7 @@ function AnimatedCounter({ end, duration = 2000, suffix = '' }: { end: number; d
 }
 
 // ---- Floating Code Particle ----
-function CodeParticle({ delay, x, y }: { delay: number; x: string; y: string }) {
-  const symbols = ['{ }', '< />', 'fn()', '[ ]', '=> ', '$ _', ':::', '&&', '||', '!=', '===', 'if()', '++', '0x', '#!'];
-  const symbol = symbols[Math.floor(Math.random() * symbols.length)];
+function CodeParticle({ delay, x, y, symbol, duration }: { delay: number; x: string; y: string; symbol: string; duration: number }) {
   return (
     <div
       style={{
@@ -66,8 +64,7 @@ function CodeParticle({ delay, x, y }: { delay: number; x: string; y: string }) 
         fontSize: '13px',
         color: 'var(--primary-400)',
         opacity: 0.15,
-        animation: `float ${6 + Math.random() * 4}s ease-in-out infinite`,
-        animationDelay: `${delay}s`,
+        animation: `float ${duration}s ease-in-out ${delay}s infinite`,
         pointerEvents: 'none',
         userSelect: 'none',
       }}
@@ -108,6 +105,7 @@ export default function LandingPage() {
   const { theme } = useTheme();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [particles, setParticles] = useState<{ delay: number; x: string; y: string; symbol: string; duration: number }[]>([]);
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);
@@ -115,11 +113,17 @@ export default function LandingPage() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  const particles = Array.from({ length: 20 }, (_, i) => ({
-    delay: i * 0.5,
-    x: `${Math.random() * 100}%`,
-    y: `${Math.random() * 100}%`,
-  }));
+  useEffect(() => {
+    const symbols = ['{ }', '< />', 'fn()', '[ ]', '=> ', '$ _', ':::', '&&', '||', '!=', '===', 'if()', '++', '0x', '#!'];
+    const generated = Array.from({ length: 20 }, (_, i) => ({
+      delay: i * 0.5,
+      x: `${Math.random() * 100}%`,
+      y: `${Math.random() * 100}%`,
+      symbol: symbols[Math.floor(Math.random() * symbols.length)],
+      duration: 6 + Math.random() * 4,
+    }));
+    setParticles(generated);
+  }, []);
 
   return (
     <div style={{ minHeight: '100vh', position: 'relative', overflow: 'hidden' }}>

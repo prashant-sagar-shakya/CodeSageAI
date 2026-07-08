@@ -1,38 +1,30 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# dependencies
-/node_modules
-/.pnp
-.pnp.js
-.yarn/install-state.gz
-
-# testing
-/coverage
-
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
+# General
 .DS_Store
 *.pem
-
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# local env files
+.env
 .env*.local
+*.env
+/.next/
 
-# vercel
-.vercel
+# Frontend (Next.js)
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/next-env.d.ts
+frontend/.tsbuildinfo
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
-
-neonCreds.txt
+# Backend (FastAPI / Python)
+backend/venv/
+backend/.venv/
+backend/__pycache__/
+backend/**/*.pyc
+backend/.pytest_cache/
+backend/codesage.db
+backend/htmlcov/
+backend/.coverage
+backend/.mypy_cache/
+backend/celerybeat-schedule
