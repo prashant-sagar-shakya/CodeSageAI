@@ -1,5 +1,6 @@
-export default function GenericSettingsPage({ params }: { params: { section: string } }) {
-  const sectionName = params.section.charAt(0).toUpperCase() + params.section.slice(1);
+export default async function GenericSettingsPage({ params }: { params: Promise<{ section: string }> }) {
+  const { section } = await params;
+  const sectionName = section.charAt(0).toUpperCase() + section.slice(1);
   
   return (
     <div>
