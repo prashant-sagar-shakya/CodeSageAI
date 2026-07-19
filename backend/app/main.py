@@ -48,7 +48,7 @@ async def lifespan(app: FastAPI):
         except Exception:
             session.rollback()
         
-    # Auto scanner disabled to prevent Gemini API limits
+    # Auto scanner disabled to prevent API limits
     # import asyncio
     # from app.tasks.auto_scanner import start_auto_scanner
     # asyncio.create_task(start_auto_scanner())

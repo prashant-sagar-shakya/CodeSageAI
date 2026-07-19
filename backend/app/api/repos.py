@@ -347,6 +347,8 @@ async def rescan_all(owner_id: int, db: Session = Depends(get_session)):
 @router.post("/{repo_id}/rescan")
 async def rescan_repo(repo_id: int, db: Session = Depends(get_session)):
     """Trigger a manual background scan of a single repository."""
+    import asyncio
+    
     repo = db.get(Repository, repo_id)
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
@@ -357,9 +359,6 @@ async def rescan_repo(repo_id: int, db: Session = Depends(get_session)):
     logger = logging.getLogger(__name__)
     
     installation_id = await github_service.get_repo_installation_id(repo.full_name)
-    token = None
-    if installation_id:
-        token = await github_service.get_installation_token(installation_id)
         
     # Create a full codebase review record
     review = PRReview(
@@ -375,6 +374,48 @@ async def rescan_repo(repo_id: int, db: Session = Depends(get_session)):
     db.commit()
     db.refresh(review)
     
-    # Run synchronously instead of queueing to avoid frontend complexity
-    await review_service.process_pr_review(review.id, installation_id)
-    return {"status": "success", "review_id": review.id, "message": "Manual full codebase scan completed."}
+    review_id = review.id
+    
+    # Run as background task so the frontend gets an immediate response
+    asyncio.create_task(review_service.process_pr_review(review_id, installation_id))
+    
+    return {
+        "status": "success", 
+        "review_id": review_id, 
+        "message": "Scan started. Poll /scan-progress for real-time updates."
+    }
+
+@router.get("/{repo_id}/scan-progress")
+async def get_scan_progress_endpoint(repo_id: int, db: Session = Depends(get_session)):
+    """Get the real-time scan progress for a repository's latest review."""
+    from app.services.review_service import get_scan_progress
+    
+    # Find the latest review for this repo
+    statement = select(PRReview).where(
+        PRReview.repository_id == repo_id
+    ).order_by(PRReview.id.desc())  # type: ignore
+    latest_review = db.exec(statement).first()
+    
+    if not latest_review:
+        return {"status": "no_review", "progress_pct": 0}
+    
+    # Check in-memory progress store first
+    progress = get_scan_progress(latest_review.id)
+    if progress:
+        return {
+            "review_id": latest_review.id,
+            **progress
+        }
+    
+    # Fallback to DB status
+    return {
+        "review_id": latest_review.id,
+        "status": latest_review.status,
+        "current_step": 0 if latest_review.status == "pending" else 5,
+        "total_steps": 5,
+        "current_agent": "Completed" if latest_review.status == "completed" else latest_review.status.capitalize(),
+        "progress_pct": 100 if latest_review.status == "completed" else 0,
+        "eta_seconds": 0,
+        "messages": [],
+    }
+

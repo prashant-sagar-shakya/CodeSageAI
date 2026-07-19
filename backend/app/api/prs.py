@@ -77,6 +77,11 @@ def get_review_status(review_id: int, db: Session = Depends(get_session)):
     if not review:
         raise HTTPException(status_code=404, detail="Review not found")
         
+    progress = None
+    if review.status in ("pending", "processing"):
+        from app.services.review_service import get_scan_progress
+        progress = get_scan_progress(review.id)
+        
     return {
         "id": review.id,
         "pr_number": review.pr_number,
@@ -97,5 +102,6 @@ def get_review_status(review_id: int, db: Session = Depends(get_session)):
         "total_files": review.total_files,
         "total_lines": review.total_lines,
         "created_at": review.created_at,
-        "issues": review.issues
+        "issues": review.issues,
+        "progress": progress
     }

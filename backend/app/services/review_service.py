@@ -1,14 +1,53 @@
 import logging
+import time
 import traceback
-from typing import Optional
+from typing import Optional, Dict, Any
 from sqlmodel import Session
 from app.core.database import engine
 from app.models.pr_review import PRReview
 from app.models.issue import ReviewIssue
-from app.agents.orchestrator import orchestrator
+from app.agents.orchestrator import orchestrator, AGENT_STEPS
 from app.services.github_service import github_service
 
 logger = logging.getLogger(__name__)
+
+# In-memory progress store (keyed by review_id)
+# This avoids hammering the DB with updates on every agent step
+_scan_progress: Dict[int, Dict[str, Any]] = {}
+
+
+def get_scan_progress(review_id: int) -> Optional[Dict[str, Any]]:
+    """Get the current scan progress for a review."""
+    prog = _scan_progress.get(review_id)
+    if not prog or prog.get("status") != "processing":
+        return prog
+        
+    # Create a copy to interpolate real-time progress
+    prog_copy = prog.copy()
+    
+    last_update = prog_copy.get("last_update_time", time.time())
+    elapsed = time.time() - last_update
+    
+    step_weight = prog_copy.get("current_step_weight", 0)
+    total_weight = prog_copy.get("total_weight", 100)
+    
+    # We smoothly advance the progress through the current step's weight over an estimated 20s per LLM call.
+    # This provides a TRUE real-time continuous progress experience on the frontend!
+    fraction = min(elapsed / 20.0, 0.95) # Cap at 95% of the current step
+    added_pct = int((step_weight / total_weight) * 100 * fraction)
+    
+    prog_copy["progress_pct"] = min(prog_copy.get("progress_pct", 0) + added_pct, 99)
+    
+    if prog_copy.get("eta_seconds"):
+        prog_copy["eta_seconds"] = max(0, int(prog_copy["eta_seconds"] - elapsed))
+        
+    return prog_copy
+
+
+def clear_scan_progress(review_id: int):
+    """Clear progress data after scan completes."""
+    _scan_progress.pop(review_id, None)
+
 
 class ReviewService:
     async def process_pr_review(self, review_id: int, installation_id: Optional[int] = None):
@@ -27,6 +66,70 @@ class ReviewService:
             # Fetch repository reference
             repo = review.repository
 
+        # Initialize progress tracking
+        start_time = time.time()
+        total_steps = len(AGENT_STEPS)
+        completed_steps = 0
+        
+        _scan_progress[review_id] = {
+            "status": "processing",
+            "current_step": 0,
+            "total_steps": total_steps,
+            "current_agent": "Initializing...",
+            "progress_pct": 0,
+            "last_update_time": time.time(),
+            "current_step_weight": 5,  # Dummy weight for smooth interpolation during GitHub fetch
+            "total_weight": 100,
+            "eta_seconds": None,
+            "messages": [],
+        }
+
+        async def progress_callback(step_name: str, message: str):
+            """Called by the orchestrator after each agent step."""
+            nonlocal completed_steps
+            
+            # Find the step index
+            step_idx = next(
+                (i for i, s in enumerate(AGENT_STEPS) if s["name"] == step_name), 
+                completed_steps
+            )
+            
+            if "complete" in message.lower() or "skipped" in message.lower():
+                completed_steps = step_idx + 1
+
+            # Calculate base cumulative progress weight (ONLY completed steps)
+            weight_completed = sum(s["weight"] for s in AGENT_STEPS[:completed_steps])
+            total_weight = sum(s["weight"] for s in AGENT_STEPS)
+            base_pct = int((weight_completed / total_weight) * 100)
+            
+            # Estimate ETA based on elapsed time and progress
+            elapsed = time.time() - start_time
+            if base_pct > 0:
+                estimated_total = elapsed / (base_pct / 100)
+                eta = max(0, int(estimated_total - elapsed))
+            else:
+                eta = None
+            # Find the label for the current step
+            step_label = next(
+                (s["label"] for s in AGENT_STEPS if s["name"] == step_name),
+                step_name
+            )
+            
+            _scan_progress[review_id] = {
+                "status": "processing",
+                "current_step": step_idx + 1,
+                "total_steps": total_steps,
+                "current_agent": step_label,
+                "progress_pct": min(base_pct, 99),  # Base percentage of completed steps
+                "last_update_time": time.time(),
+                "current_step_weight": AGENT_STEPS[step_idx]["weight"] if step_idx < len(AGENT_STEPS) else 0,
+                "total_weight": total_weight,
+                "eta_seconds": eta,
+                "messages": _scan_progress.get(review_id, {}).get("messages", []) + [
+                    {"agent": step_label, "message": message, "timestamp": time.time()}
+                ],
+            }
+
         try:
             # 1. Fetch GitHub app installation token
             token = None
@@ -41,7 +144,7 @@ class ReviewService:
                     f"Repository: {repo.full_name}\n"
                     f"Branch: {getattr(repo, 'default_branch', 'main')}"
                 )
-                branch = getattr(repo, "default_branch", "main")
+                tree_sha = getattr(repo, "default_branch", "main")
                 pr_details = {"changed_files": 0, "additions": 0, "deletions": 0}
                 
             elif review.review_type == "commit":
@@ -53,8 +156,8 @@ class ReviewService:
                     f"Commit Message: {review.pr_title}\n"
                     f"Branch: {review.head_branch}"
                 )
-                branch = review.head_branch or getattr(repo, "default_branch", "main")
-                pr_details = {"changed_files": 0, "additions": 0, "deletions": 0} # Dummy for commits without full stat API call
+                tree_sha = review.commit_hash or review.head_branch or getattr(repo, "default_branch", "main")
+                pr_details = {"changed_files": 0, "additions": 0, "deletions": 0}
                 
             else:
                 # It's a PR review
@@ -67,16 +170,17 @@ class ReviewService:
                     f"Head Branch: {pr_details.get('head_branch')}\n"
                     f"Changed Files Count: {pr_details.get('changed_files')}"
                 )
-                branch = pr_details.get("head_branch") or getattr(repo, "default_branch", "main")
+                tree_sha = pr_details.get("base_sha") or pr_details.get("base_branch") or getattr(repo, "default_branch", "main")
 
             # Fetch directory structure dynamically from GitHub App API
-            repo_tree = await github_service.get_repo_tree(repo.full_name, branch, token)
+            repo_tree = await github_service.get_repo_tree(repo.full_name, tree_sha, token)
             
-            # 3. Run parallel multi-agent analysis via orchestrator
+            # 3. Run multi-agent analysis via orchestrator with progress tracking
             result = await orchestrator.run_full_review(
                 repo_structure=repo_tree,
                 diffs=diffs,
-                files_summary=files_summary
+                files_summary=files_summary,
+                progress_callback=progress_callback
             )
             
             # 4. Save review results and issue logs
@@ -134,16 +238,28 @@ class ReviewService:
                     db.add(db_issue)
                     
                 db.add(review)
+                pr_number_val = review.pr_number
                 db.commit()
                 
             # 5. Write reviews back to GitHub App (if active app tokens are enabled)
-            if token and result.get("issues"):
+            if token and result.get("issues") and pr_number_val:
                 await github_service.create_pr_review(
                     repo_full_name=repo.full_name,
-                    pr_number=review.pr_number,
+                    pr_number=pr_number_val,
                     comments=result.get("issues"),
                     token=token
                 )
+
+            # Mark progress as complete
+            _scan_progress[review_id] = {
+                "status": "completed",
+                "current_step": total_steps,
+                "total_steps": total_steps,
+                "current_agent": "Done",
+                "progress_pct": 100,
+                "eta_seconds": 0,
+                "messages": _scan_progress.get(review_id, {}).get("messages", []),
+            }
                 
             logger.info(f"PR Review task ID {review_id} ran successfully.")
             
@@ -155,6 +271,19 @@ class ReviewService:
                     review.status = "failed"
                     db.add(review)
                     db.commit()
+            
+            # Mark progress as failed
+            _scan_progress[review_id] = {
+                "status": "failed",
+                "current_step": 0,
+                "total_steps": total_steps,
+                "current_agent": "Failed",
+                "progress_pct": 0,
+                "eta_seconds": 0,
+                "messages": _scan_progress.get(review_id, {}).get("messages", []) + [
+                    {"agent": "System", "message": f"Error: {str(e)}", "timestamp": time.time()}
+                ],
+            }
 
 # Global Singleton
 review_service = ReviewService()

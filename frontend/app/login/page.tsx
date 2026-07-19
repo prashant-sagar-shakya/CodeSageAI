@@ -48,9 +48,17 @@ function LoginContent() {
   const handleLogin = () => {
     setLoading(true);
     setError('');
-    const clientId = 'Iv23linu5FGQGo8gq0uO';
+    // Use the environment variable if available, fallback to the known ID for dev
+    const clientId = process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID || 'Iv23linu5FGQGo8gq0uO';
+    
+    // 1. Generate a random state string to prevent CSRF and help GitHub maintain session
+    const state = Math.random().toString(36).substring(7);
+    
+    // 2. Hardcode the redirect URI to EXACTLY match your GitHub App settings
     const redirectUri = 'http://localhost:3000/login';
-    window.location.href = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=user:email`;
+    
+    // 3. Construct the URL with client_id, redirect_uri, and state
+    window.location.href = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
   };
 
   return (

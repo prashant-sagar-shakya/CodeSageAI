@@ -101,16 +101,7 @@ class GitHubService:
     async def get_pr_details(self, repo_full_name: str, pr_number: int, token: Optional[str] = None) -> Dict[str, Any]:
         """Fetch metadata details for a specific Pull Request."""
         if not token:
-            logger.warning("No GitHub token provided. Returning mock PR details.")
-            return {
-                "number": pr_number,
-                "title": "feat: Implement Stripe payment gateway with webhook handlers",
-                "base_branch": "main",
-                "head_branch": "feature/stripe-payment",
-                "additions": 847,
-                "deletions": 123,
-                "changed_files": 14
-            }
+            raise ValueError("No GitHub token provided for get_pr_details.")
 
         url = f"https://api.github.com/repos/{repo_full_name}/pulls/{pr_number}"
         headers = {
@@ -121,16 +112,7 @@ class GitHubService:
         try:
             response = await self.client.get(url, headers=headers)
             if response.status_code == 404:
-                logger.warning(f"PR #{pr_number} not found for details. Returning mock fallback.")
-                return {
-                    "number": pr_number,
-                    "title": "Automated Routine Scan",
-                    "base_branch": "main",
-                    "head_branch": "main",
-                    "additions": 0,
-                    "deletions": 0,
-                    "changed_files": 0
-                }
+                raise ValueError(f"PR #{pr_number} not found in {repo_full_name}.")
             response.raise_for_status()
             data = response.json()
             return {
@@ -138,6 +120,8 @@ class GitHubService:
                 "title": data.get("title"),
                 "base_branch": data.get("base", {}).get("ref"),
                 "head_branch": data.get("head", {}).get("ref"),
+                "base_sha": data.get("base", {}).get("sha"),
+                "head_sha": data.get("head", {}).get("sha"),
                 "additions": data.get("additions", 0),
                 "deletions": data.get("deletions", 0),
                 "changed_files": data.get("changed_files", 0)
@@ -191,49 +175,7 @@ class GitHubService:
     async def get_pr_diff(self, repo_full_name: str, pr_number: int, token: Optional[str] = None) -> str:
         """Fetch the raw code diff of a specific Pull Request."""
         if not token:
-            logger.warning("No GitHub token provided. Returning mock PR diff.")
-            # Return standard mock diff string
-            return """diff --git a/src/services/paymentService.ts b/src/services/paymentService.ts
-index e69de29..991b1b 100644
---- a/src/services/paymentService.ts
-+++ b/src/services/paymentService.ts
-@@ -1,17 +1,26 @@
- import Stripe from 'stripe';
- import { Order, PaymentResult } from '../types';
- 
--const stripe = new Stripe('sk_live_abc123xyz789');
-+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
- 
- export async function processPayment(order: Order): Promise<PaymentResult> {
--  const result = await stripe.charges.create({
--    amount: order.total,
--    currency: 'usd',
--    source: order.paymentToken,
--  });
-+  try {
-+    const result = await stripe.charges.create({
-+      amount: order.total,
-+      currency: 'usd',
-+      source: order.paymentToken,
-+    });
- 
--  const charge = result.data.charge;
--  const amount = charge.amount;
-+    const charge = result?.data?.charge;
-+    if (!charge) {
-+      throw new PaymentError('Payment failed: no charge data');
-+    }
-+    const amount = charge.amount;
-+
--  await updateOrder(orderId, charge.id);
-+    await updateOrder(order.id, charge.id);
-+    return { success: true, chargeId: charge.id, amount };
-+  } catch (error) {
-+    logger.error('Payment processing failed', { orderId: order.id, error });
-+    throw error;
-+  }
- }
-"""
+            raise ValueError("No GitHub token provided for get_pr_diff.")
 
         url = f"https://api.github.com/repos/{repo_full_name}/pulls/{pr_number}"
         headers = {
@@ -255,8 +197,7 @@ index e69de29..991b1b 100644
     async def get_repo_tree(self, repo_full_name: str, branch: str = "main", token: Optional[str] = None) -> str:
         """Fetch the list of files in the repository using the Git Trees API."""
         if not token:
-            logger.warning("No GitHub token provided. Returning default mock repo tree.")
-            return "src/\n  controllers/\n    productController.ts\n    orderController.ts\n  services/\n    paymentService.ts\n    orderService.ts\n  middleware/\n    auth.ts"
+            raise ValueError("No GitHub token provided for get_repo_tree.")
 
         url = f"https://api.github.com/repos/{repo_full_name}/git/trees/{branch}?recursive=1"
         headers = {
@@ -269,20 +210,28 @@ index e69de29..991b1b 100644
                 data = response.json()
                 paths = [item.get("path") for item in data.get("tree", []) if item.get("type") == "blob"]
                 return "\n".join(paths[:150])
+            elif response.status_code == 404 and branch != "HEAD":
+                logger.warning(f"Tree {branch} not found. Falling back to HEAD.")
+                fallback_url = f"https://api.github.com/repos/{repo_full_name}/git/trees/HEAD?recursive=1"
+                fb_response = await self.client.get(fallback_url, headers=headers)
+                if fb_response.status_code == 200:
+                    data = fb_response.json()
+                    paths = [item.get("path") for item in data.get("tree", []) if item.get("type") == "blob"]
+                    return "\n".join(paths[:150])
+                else:
+                    raise ValueError(f"Failed to fetch repo tree (status {fb_response.status_code}).")
             else:
-                logger.warning(f"Failed to fetch repo tree (status {response.status_code}). Using fallback.")
-                return "src/\n  controllers/\n    productController.ts"
+                raise ValueError(f"Failed to fetch repo tree (status {response.status_code}).")
         except Exception as e:
             logger.error(f"Error fetching repo tree: {e}")
-            return "src/\n  controllers/\n    productController.ts"
+            raise e
 
     async def create_pr_review(
         self, repo_full_name: str, pr_number: int, comments: List[Dict[str, Any]], token: Optional[str] = None
     ) -> bool:
         """Post aggregated code-review comments back to GitHub as an official PR review."""
         if not token:
-            logger.info("Mock mode: skipping posting PR review back to GitHub.")
-            return True
+            raise ValueError("No GitHub token provided to post PR review.")
 
         url = f"https://api.github.com/repos/{repo_full_name}/pulls/{pr_number}/reviews"
         headers = {
@@ -316,18 +265,7 @@ index e69de29..991b1b 100644
     async def get_repo_details(self, repo_full_name: str, token: Optional[str] = None) -> Dict[str, Any]:
         """Fetch metadata details for a repository from GitHub API."""
         if not token:
-            logger.warning("No GitHub token provided for repository details. Returning mock details.")
-            return {
-                "id": 123456789,
-                "name": repo_full_name.split("/")[-1],
-                "full_name": repo_full_name,
-                "description": "Mock repository description",
-                "language": "TypeScript",
-                "stargazers_count": 10,
-                "forks_count": 2,
-                "open_issues_count": 0,
-                "private": False
-            }
+            raise ValueError("No GitHub token provided for repository details.")
 
         url = f"https://api.github.com/repos/{repo_full_name}"
         headers = {

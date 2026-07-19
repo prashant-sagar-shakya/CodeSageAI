@@ -152,6 +152,12 @@ export async function rescanRepo(repoId: number): Promise<any> {
   return res.json();
 }
 
+export async function fetchScanProgress(repoId: number): Promise<any> {
+  const res = await fetch(`${API_BASE_URL}/repos/${repoId}/scan-progress`);
+  if (!res.ok) return null;
+  return res.json();
+}
+
 export async function updateProfile(userId: number, profileData: { name: string; email: string; username: string }): Promise<any> {
   const res = await fetch(`${API_BASE_URL}/auth/users/${userId}`, {
     method: 'PUT',

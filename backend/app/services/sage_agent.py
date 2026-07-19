@@ -3,13 +3,13 @@ from sqlmodel import Session, select
 from app.core.database import engine
 from app.models.repo import Repository
 from app.models.pr_review import PRReview
-from app.services.gemini_service import GeminiService
+from app.services.huggingface_service import HuggingFaceService
 
-gemini_service = GeminiService()
+huggingface_service = HuggingFaceService()
 
 class SageAgent:
     async def chat(self, user_id: int, message: str, history: list = None) -> str:
-        """Process a chat message using Gemini, enriched with user's repository data."""
+        """Process a chat message using Hugging Face, enriched with user's repository data."""
         # 1. Fetch user context from DB
         context_str = ""
         with Session(engine) as db:
@@ -64,14 +64,14 @@ If they ask a general programming question, answer it accurately.
                 
         full_prompt += f"\nUser: {message}\nSage:"
 
-        # 3. Call Gemini
-        response_text = await gemini_service.generate_text(full_prompt)
+        # 3. Call Hugging Face
+        response_text = await huggingface_service.generate_text(full_prompt)
         return response_text
 
     async def generate_title(self, message: str) -> str:
         """Generate a short 3-5 word title for a chat based on the first message."""
         prompt = f"Generate a very concise, short title (maximum 3 to 5 words) that summarizes the following message. Return ONLY the title, no quotes, no extra text. Message: '{message}'"
-        title = await gemini_service.generate_text(prompt)
+        title = await huggingface_service.generate_text(prompt)
         return title.strip().strip('"').strip("'")
 
 sage_agent = SageAgent()

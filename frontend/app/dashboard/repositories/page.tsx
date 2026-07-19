@@ -9,7 +9,7 @@ import {
   CheckCircle2, XCircle, GitMerge, Plus, Play, Sparkles, Loader2, RefreshCw
 } from 'lucide-react';
 import { formatDate, getLanguageColor, formatNumber, getScoreColor } from '@/lib/utils';
-import { fetchRepos, importRepo, triggerReview, fetchRepoReviews, syncRepos, rescanRepo } from '@/lib/api';
+import { fetchRepos, importRepo, triggerReview, fetchRepoReviews, syncRepos, rescanRepo, fetchScanProgress } from '@/lib/api';
 
 export default function RepositoriesPage() {
   const searchParams = useSearchParams();
@@ -23,6 +23,7 @@ export default function RepositoriesPage() {
   const [loadingReviews, setLoadingReviews] = useState(false);
   const [filterLang, setFilterLang] = useState('all');
   const [scanningRepoId, setScanningRepoId] = useState<number | null>(null);
+  const [scanProgress, setScanProgress] = useState<string>('Scanning...');
 
   const loadRepositories = async () => {
     try {
@@ -289,17 +290,46 @@ export default function RepositoriesPage() {
                       e.stopPropagation();
                       if (scanningRepoId) return;
                       setScanningRepoId(repo.id);
+                      setScanProgress('Starting scan...');
                       try {
                         await rescanRepo(repo.id);
-                        if (selectedRepo === repo.id) {
-                          // refresh reviews if this repo is open
-                          const data = await fetchRepoReviews(repo.id);
-                          setRepoReviews(data);
-                        }
+                        // Poll progress every 3 seconds
+                        const pollInterval = setInterval(async () => {
+                          try {
+                            const progress = await fetchScanProgress(repo.id);
+                            if (progress) {
+                              const pct = progress.progress_pct || 0;
+                              const agent = progress.current_agent || 'Processing';
+                              let progressStr = `${agent} (${pct}%)`;
+                              if (progress.eta_seconds !== null && progress.eta_seconds !== undefined && progress.eta_seconds > 0) {
+                                const mins = Math.floor(progress.eta_seconds / 60);
+                                const secs = progress.eta_seconds % 60;
+                                const etaStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+                                progressStr += ` | ~${etaStr} left`;
+                              }
+                              setScanProgress(progressStr);
+                              if (progress.status === 'completed' || progress.status === 'failed' || pct >= 100) {
+                                clearInterval(pollInterval);
+                                setScanningRepoId(null);
+                                setScanProgress('Scanning...');
+                                // Refresh repos and reviews
+                                loadRepositories();
+                                if (selectedRepo === repo.id) {
+                                  const data = await fetchRepoReviews(repo.id);
+                                  setRepoReviews(data);
+                                }
+                              }
+                            }
+                          } catch {
+                            clearInterval(pollInterval);
+                            setScanningRepoId(null);
+                            setScanProgress('Scanning...');
+                          }
+                        }, 3000);
                       } catch (err) {
                         console.error('Scan failed', err);
-                      } finally {
                         setScanningRepoId(null);
+                        setScanProgress('Scanning...');
                       }
                     }}
                     style={{
@@ -317,7 +347,7 @@ export default function RepositoriesPage() {
                     }}
                   >
                     {scanningRepoId === repo.id ? (
-                      <><Loader2 size={12} style={{ animation: 'spin-slow 1s linear infinite' }} /> Scanning...</>
+                      <><Loader2 size={12} style={{ animation: 'spin-slow 1s linear infinite' }} /> {scanProgress}</>
                     ) : (
                       <><RefreshCw size={12} /> {repo.health_score > 0 ? 'Rescan' : 'Scan Now'}</>
                     )}

@@ -12,7 +12,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-Ready-3178C6?style=for-the-badge&logo=typescript)](https://www.typescriptlang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 
-*CodeSageAI acts as your senior engineering partner, analyzing GitHub Pull Requests with 8 specialized AI agents to detect bugs, security vulnerabilities, and performance issues while generating human-like review comments.*
+*CodeSageAI acts as your senior engineering partner, analyzing GitHub Pull Requests with 3 consolidated AI agents + a Smart Scanner pipeline (Tree-sitter → Semgrep → VulnLLM → Qwen Coder) to detect bugs, security vulnerabilities, and performance issues with real-time progress tracking.*
 
 [Live Demo](#) · [Report Bug](https://github.com/prashant-sagar-shakya/CodeSageAI/issues) · [Request Feature](https://github.com/prashant-sagar-shakya/CodeSageAI/issues)
 
@@ -22,7 +22,7 @@
 
 ## 🚀 Overview
 
-**CodeSageAI** is a robust platform designed to elevate code quality through autonomous, AI-driven reviews. Simply connect your GitHub account, select a repository, and let our multi-agent architecture dive deep into your codebase. It simulates a senior engineer's review process, catching issues that traditional linters miss, and providing actionable, inline fix suggestions.
+**CodeSageAI** is a robust platform designed to elevate code quality through autonomous, AI-driven reviews. Simply connect your GitHub account, select a repository, and let our multi-agent architecture dive deep into your codebase. Powered by Hugging Face's open-source LLMs, it simulates a senior engineer's review process, catching issues that traditional linters miss, and providing actionable, inline fix suggestions — all with live scan progress and ETA tracking.
 
 ### 🎯 Target Audience
 - **Software Engineers:** Automate code reviews with actionable insights.
@@ -35,8 +35,10 @@
 
 ## ✨ Key Features
 
-- **Multi-Agent Intelligence:** 8 specialized agents working in parallel for comprehensive analysis.
-- **GitHub Integration:** Seamlessly fetch branches and Pull Requests.
+- **Consolidated AI Agents:** 3 optimized agents (Code Health, Reliability, Security) for comprehensive, credit-efficient analysis.
+- **Smart Scanner Pipeline:** Tree-sitter → Semgrep → VulnLLM-R-7B → Qwen Coder for deep vulnerability and logic review.
+- **Real-Time Scan Progress:** Live progress bar with ETA, showing which agent is currently scanning.
+- **GitHub App Integration:** Seamlessly fetch branches, PRs, and commits via GitHub App OAuth.
 - **GitHub-style Code Diff Viewer:** Review inline AI comments right within the code diff.
 - **Premium UI/UX:** Stunning Dark/Light mode interface with glassmorphism, built on Next.js 15 & Tailwind v4.
 - **Interactive Dashboards:** Real-time charts, score rings, and repository health radars.
@@ -46,16 +48,21 @@
 
 ## 🤖 Multi-Agent Architecture
 
-Our platform utilizes specialized agents to analyze your codebase from every angle:
+Our platform uses a consolidated, credit-efficient architecture:
 
-1. 📂 **Repository Analyzer Agent:** Understands folder structure, tech stack, dependencies, and core files.
-2. 💻 **Code Quality Agent:** Enforces SOLID principles, checks naming conventions, and spots duplicate/dead code.
-3. 🐛 **Bug Detection Agent:** Identifies null pointers, infinite loops, memory leaks, and async/promise errors.
-4. 🛡️ **Security Agent:** Conducts OWASP Top 10 checks (SQLi, XSS, CSRF, hardcoded secrets, JWT issues).
-5. ⚡ **Performance Agent:** Optimizes slow loops, catches N+1 queries, and analyzes algorithm complexity.
-6. 📄 **Documentation Agent:** Generates missing comments, API documentation, and README enhancements.
-7. 🧪 **Testing Agent:** Suggests unit, integration, and edge-case tests, along with mocking strategies.
-8. ♻️ **Refactoring Agent:** Recommends design patterns, cleaner architecture, and method extraction.
+### Core AI Agents (LangGraph Pipeline)
+1. 📂 **Repository Analyzer:** Understands folder structure, tech stack, dependencies, and core files.
+2. 🏥 **Code Health Agent:** Combines code quality, documentation, and refactoring analysis — enforces SOLID principles, naming conventions, missing docs, and clean architecture.
+3. ⚙️ **Reliability Agent:** Combines bug detection, performance, and testing — identifies null pointers, memory leaks, N+1 queries, and missing test coverage.
+4. 🛡️ **Security Agent:** Conducts OWASP Top 10 checks (SQLi, XSS, CSRF, hardcoded secrets, CWE mapping).
+
+### Smart Scanner Pipeline (AI Fallback)
+5. 🌳 **Tree-sitter:** AST parsing for structural code analysis.
+6. 🔍 **Semgrep:** Static analysis for pattern-based vulnerability detection.
+7. 🧠 **VulnLLM-R-7B:** AI-powered security vulnerability review.
+8. 💡 **Qwen Coder:** Logical bug and correctness review.
+
+> The Smart Scanner only activates when the main 3 agents find fewer than 3 issues, saving API credits while ensuring thorough coverage.
 
 ---
 
@@ -69,9 +76,10 @@ Our platform utilizes specialized agents to analyze your codebase from every ang
 - **Charts:** [Recharts](https://recharts.org/)
 - **Icons:** [Lucide React](https://lucide.dev/)
 
-### Backend & AI (Upcoming Phase 2)
+### Backend & AI
 - **Framework:** Python, FastAPI
-- **AI/LLM:** LangGraph, LangChain, OpenAI / Google Gemini
+- **AI/LLM:** LangGraph, Hugging Face Serverless Inference API (Qwen 2.5 Coder 32B)
+- **Smart Scanner:** Tree-sitter, Semgrep, VulnLLM-R-7B, Qwen Coder
 - **Database:** PostgreSQL, Redis
 - **Infrastructure:** Docker, GitHub Actions
 
@@ -81,7 +89,9 @@ Our platform utilizes specialized agents to analyze your codebase from every ang
 
 ### Prerequisites
 - [Node.js](https://nodejs.org/) (v18.17.0 or higher)
-- [npm](https://www.npmjs.com/) or [yarn](https://yarnpkg.com/)
+- [Python 3.12+](https://www.python.org/)
+- [PostgreSQL](https://www.postgresql.org/)
+- [Hugging Face Account](https://huggingface.co/) (free tier works!)
 
 ### Installation
 
@@ -91,21 +101,36 @@ Our platform utilizes specialized agents to analyze your codebase from every ang
    cd CodeSageAI
    ```
 
-2. **Install dependencies:**
+2. **Setup Backend:**
    ```bash
+   cd backend
+   python -m venv venv
+   source venv/bin/activate  # Windows: venv\Scripts\activate
+   pip install -r requirements.txt
+   ```
+
+3. **Configure Environment:**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your Hugging Face API key and PostgreSQL credentials
+   ```
+
+4. **Install Frontend Dependencies:**
+   ```bash
+   cd ../frontend
    npm install
-   # or
-   yarn install
    ```
 
-3. **Run the development server:**
+5. **Run both servers:**
    ```bash
-   npm run dev
-   # or
-   yarn dev
+   # Terminal 1 — Backend
+   cd backend && uvicorn app.main:app --reload
+
+   # Terminal 2 — Frontend
+   cd frontend && npm run dev
    ```
 
-4. **Open your browser:**
+6. **Open your browser:**
    Navigate to [http://localhost:3000](http://localhost:3000) to see the application running.
 
 ---

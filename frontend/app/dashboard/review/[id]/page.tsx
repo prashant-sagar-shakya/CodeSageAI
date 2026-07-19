@@ -11,41 +11,6 @@ import {
 import { getScoreColor, formatDate } from '@/lib/utils';
 import { fetchReview } from '@/lib/api';
 
-const mockAgents = [
-  { name: 'Repository Structure', icon: 'FolderSearch', color: '#6366f1' },
-  { name: 'Bug Detector', icon: 'Bug', color: '#ef4444' },
-  { name: 'Security Auditor', icon: 'Shield', color: '#f59e0b' },
-  { name: 'Performance Optimizer', icon: 'Zap', color: '#10b981' },
-  { name: 'Readability Analyzer', icon: 'FileText', color: '#06b6d4' },
-  { name: 'Test Coverage', icon: 'TestTube2', color: '#ec4899' },
-  { name: 'Code Quality', icon: 'Code2', color: '#8b5cf6' },
-];
-
-const mockFileDiff = `diff --git a/src/paymentService.ts b/src/paymentService.ts
-index d82fa7c..45e7f21 100644
---- a/src/paymentService.ts
-+++ b/src/paymentService.ts
-@@ -10,6 +10,12 @@ export class PaymentService {
-   async processPayment(amount: number, userId: string): Promise<boolean> {
-     console.log(\`Processing payment for user \${userId} of amount \${amount}\`);
-     
-+    // CRITICAL SECURITY FIX
-+    if (amount <= 0) {
-+      console.error("Invalid payment amount specified");
-+      return false;
-+    }
-+
-     const user = await db.getUser(userId);
-     if (!user) {
-       throw new Error("User does not exist");
-@@ -28,7 +34,7 @@ export class PaymentService {
--    const gatewayKey = process.env.PAYMENT_SECRET;
-+    const gatewayKey = await vault.getSecret("PAYMENT_SECRET");
-     const response = await gateway.charge(amount, gatewayKey);
-     
-     return response.success;
-   }`;
-
 // ---- Icon Map ----
 const agentIconMap: Record<string, React.ElementType> = {
   FolderSearch, Code2, Bug, Shield, Zap, FileText, TestTube2, RefreshCw,
@@ -446,12 +411,12 @@ export default function ReviewPage() {
         <AlertTriangle size={48} style={{ color: '#ef4444', marginBottom: '16px', margin: '0 auto 16px' }} />
         <h3 style={{ fontSize: '18px', fontWeight: 800, marginBottom: '8px' }}>Failed to Load Review Details</h3>
         <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '24px' }}>{error || 'No review run record found.'}</p>
-        <Link href="/dashboard/repositories" style={{
+        <button onClick={() => window.location.href = "/dashboard/repositories"} style={{
           padding: '10px 20px', borderRadius: 'var(--radius-md)', background: 'var(--gradient-primary)',
-          color: 'white', textDecoration: 'none', fontWeight: 700, fontSize: '13px',
+          color: 'white', border: 'none', cursor: 'pointer', fontWeight: 700, fontSize: '13px',
         }}>
           Back to Repositories
-        </Link>
+        </button>
       </div>
     );
   }
@@ -462,12 +427,12 @@ export default function ReviewPage() {
       <div style={{ maxWidth: '800px', margin: '60px auto', padding: '32px', textAlign: 'center' }} className="glass-card animate-scale-in">
         <Sparkles size={48} className="animate-spin-slow" style={{ color: 'var(--primary-500)', marginBottom: '24px', margin: '0 auto 24px' }} />
         <h2 style={{ fontSize: '22px', fontWeight: 800, marginBottom: '8px' }}>
-          {review.status === 'pending' ? 'Review Queued in PostgreSQL' : 'AI Review in Progress'}
+          {review.status === 'pending' ? 'Review Queued' : 'AI Review in Progress'}
         </h2>
         <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '24px', maxWidth: '500px', margin: '0 auto 24px' }}>
           {review.status === 'pending' 
             ? `Your ${review.review_type === 'commit' ? 'commit' : 'PR'} review is registered. Waiting for the background task runner to dispatch.`
-            : `8 AI agents are parallel-scanning your ${review.review_type === 'commit' ? 'commit' : 'PR'} diff file for bugs, security vulnerabilities, performance issues, and readability guidelines.`
+            : `3 consolidated AI agents are scanning your ${review.review_type === 'commit' ? 'commit' : 'PR'} for bugs, security vulnerabilities, performance issues, and code quality.`
           }
         </p>
 
@@ -482,14 +447,43 @@ export default function ReviewPage() {
           <div>[INFO] {review.review_type === 'commit' ? `Commit: ${review.commit_hash?.slice(0, 7)}` : `PR Number: #${review.pr_number}`} | Base: {review.base_branch || 'N/A'} / Head: {review.head_branch || 'N/A'}</div>
           {review.status === 'processing' && (
             <>
-              <div>[INFO] Triggering parallel agent cluster...</div>
-              <div>[RUNNING] Bug Detector Node analyzing code structures...</div>
-              <div>[RUNNING] OWASP Security Agent auditing dependencies & credentials...</div>
-              <div>[RUNNING] Performance Node testing time complexities...</div>
+              <div>[INFO] Triggering consolidated agent pipeline...</div>
+              <div>[RUNNING] Code Health Agent analyzing quality, docs & architecture...</div>
+              <div>[RUNNING] Reliability Agent detecting bugs & performance issues...</div>
+              <div>[RUNNING] Security Agent auditing OWASP Top 10 & CWE mapping...</div>
+              <div>[STANDBY] Smart Scanner (Tree-sitter → Semgrep → AI) on fallback...</div>
             </>
           )}
-          <div style={{ color: 'var(--text-tertiary)', animation: 'pulse 1.5s infinite' }}>[POLLING] Waiting for agent aggregation... (updating in 3s)</div>
+          <div style={{ color: 'var(--text-tertiary)', animation: 'pulse 1.5s infinite' }}>[POLLING] Waiting for agent aggregation... (auto-refreshing)</div>
         </div>
+
+        {/* Real-time Progress Bar & ETA */}
+        {review.progress && review.status === 'processing' && (
+          <div style={{
+            background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)',
+            padding: '16px', marginTop: '24px', textAlign: 'left',
+            border: '1px solid var(--border-primary)',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '13px', fontWeight: 600 }}>
+              <span style={{ color: 'var(--primary-500)' }}>
+                {review.progress.current_agent || 'Analyzing...'}
+              </span>
+              <span style={{ color: 'var(--text-secondary)' }}>
+                {review.progress.eta_seconds ? `~${Math.floor(review.progress.eta_seconds / 60)}m ${review.progress.eta_seconds % 60}s left` : 'Calculating ETA...'}
+              </span>
+            </div>
+            <div style={{ width: '100%', height: '8px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-full)', overflow: 'hidden' }}>
+              <div style={{
+                height: '100%', background: 'var(--gradient-primary)',
+                width: `${review.progress.progress_pct || 0}%`,
+                transition: 'width 1s linear',
+              }} />
+            </div>
+            <div style={{ textAlign: 'right', fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '6px', fontWeight: 700 }}>
+              {review.progress.progress_pct || 0}%
+            </div>
+          </div>
+        )}
 
         <div style={{ display: 'flex', justifyContent: 'center', gap: '10px' }}>
           <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--primary-500)', animation: 'bounce 1s infinite' }} />
@@ -622,9 +616,9 @@ export default function ReviewPage() {
             <div style={{
               display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px',
             }}>
-              {mockAgents.map((agent, i) => {
-                const Icon = agentIconMap[agent.icon] || Code2;
-                const agentFindings = issues.filter((iss: any) => iss.agent === agent.name).length;
+              {Array.from(new Set((review.issues || []).map((i: any) => i.agent))).map((agentName: any, i) => {
+                const Icon = agentIconMap[agentName] || Shield;
+                const agentFindings = issues.filter((iss: any) => iss.agent === agentName).length;
                 return (
                   <div key={i} style={{
                     padding: '14px 16px', borderRadius: 'var(--radius-md)',
@@ -632,18 +626,16 @@ export default function ReviewPage() {
                     display: 'flex', alignItems: 'center', gap: '12px',
                     transition: 'all var(--transition-fast)',
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor = agent.color; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-primary)'; }}
                   >
                     <div style={{
                       width: '36px', height: '36px', borderRadius: 'var(--radius-md)',
-                      background: `${agent.color}15`, display: 'flex',
+                      background: `rgba(var(--primary-500-rgb), 0.1)`, display: 'flex',
                       alignItems: 'center', justifyContent: 'center', flexShrink: 0,
                     }}>
-                      <Icon size={18} style={{ color: agent.color }} />
+                      <Icon size={18} style={{ color: 'var(--primary-500)' }} />
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: '13px', fontWeight: 600 }}>{agent.name}</div>
+                      <div style={{ fontSize: '13px', fontWeight: 600 }}>{agentName || 'Agent'}</div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
                         <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
                           Status: Complete
@@ -651,7 +643,7 @@ export default function ReviewPage() {
                       </div>
                     </div>
                     <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '20px', fontWeight: 800, color: agent.color }}>{agentFindings}</div>
+                      <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--primary-500)' }}>{agentFindings}</div>
                       <div style={{ fontSize: '9px', color: 'var(--text-tertiary)', fontWeight: 600 }}>FINDINGS</div>
                     </div>
                   </div>
@@ -707,12 +699,9 @@ export default function ReviewPage() {
                   background: 'var(--bg-input)', color: 'var(--text-primary)', fontSize: '12px',
                 }}>
                   <option value="all">All Agents</option>
-                  <option value="Bug Detector">Bug Detector</option>
-                  <option value="Security">Security</option>
-                  <option value="Performance">Performance</option>
-                  <option value="Readability">Readability</option>
-                  <option value="Testing">Testing</option>
-                  <option value="Documentation">Documentation</option>
+                  {Array.from(new Set(issues.map((i: any) => i.agent))).map((agent: any) => (
+                    <option key={agent} value={agent}>{agent}</option>
+                  ))}
                 </select>
               </div>
               <div>
@@ -768,7 +757,8 @@ export default function ReviewPage() {
             padding: '20px', fontSize: '12px', whiteSpace: 'pre-wrap', fontFamily: 'var(--font-mono)',
             maxHeight: '600px', overflow: 'auto',
           }}>
-            {mockFileDiff}
+            Full code diff is not currently stored in the database post-scan. 
+            (Diffs are streamed directly to the AI and discarded to save storage space.)
           </pre>
         </div>
       )}
@@ -778,9 +768,9 @@ export default function ReviewPage() {
         <div style={{
           display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '16px',
         }}>
-          {mockAgents.map((agent, i) => {
-            const Icon = agentIconMap[agent.icon] || Code2;
-            const agentIssues = issues.filter((iss: any) => iss.agent === agent.name);
+          {Array.from(new Set(issues.map((i: any) => i.agent))).map((agentName: any, i) => {
+            const Icon = agentIconMap[agentName] || Shield;
+            const agentIssues = issues.filter((iss: any) => iss.agent === agentName);
             return (
               <div key={i} className="animate-fade-up" style={{
                 background: 'var(--bg-card)', border: '1px solid var(--border-primary)',
@@ -788,25 +778,23 @@ export default function ReviewPage() {
                 transition: 'all var(--transition-normal)',
                 animationDelay: `${i * 0.08}s`, animationFillMode: 'backwards',
               }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = agent.color; e.currentTarget.style.boxShadow = `0 4px 20px ${agent.color}20`; }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border-primary)'; e.currentTarget.style.boxShadow = 'none'; }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
                   <div style={{
                     width: '44px', height: '44px', borderRadius: 'var(--radius-lg)',
-                    background: `${agent.color}15`, display: 'flex',
+                    background: `rgba(var(--primary-500-rgb), 0.1)`, display: 'flex',
                     alignItems: 'center', justifyContent: 'center',
                   }}>
-                    <Icon size={22} style={{ color: agent.color }} />
+                    <Icon size={22} style={{ color: 'var(--primary-500)' }} />
                   </div>
                   <div>
-                    <h3 style={{ fontSize: '15px', fontWeight: 700 }}>{agent.name}</h3>
+                    <h3 style={{ fontSize: '15px', fontWeight: 700 }}>{agentName || 'Agent'}</h3>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#10b981' }}>
                       <CheckCircle2 size={12} /> Complete
                     </div>
                   </div>
                   <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
-                    <div style={{ fontSize: '24px', fontWeight: 800, color: agent.color }}>{agentIssues.length}</div>
+                    <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--primary-500)' }}>{agentIssues.length}</div>
                     <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', fontWeight: 600 }}>FINDINGS</div>
                   </div>
                 </div>
@@ -817,7 +805,7 @@ export default function ReviewPage() {
                   overflow: 'hidden', marginBottom: '16px',
                 }}>
                   <div style={{
-                    height: '100%', width: '100%', background: agent.color,
+                    height: '100%', width: '100%', background: 'var(--primary-500)',
                     borderRadius: 'var(--radius-full)',
                   }} />
                 </div>

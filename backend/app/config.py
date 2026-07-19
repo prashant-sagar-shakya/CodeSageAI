@@ -10,8 +10,9 @@ class Settings(BaseSettings):
     SECRET_KEY: str = Field("codesageai-deep-agentic-secret-key-1823908", validation_alias="SECRET_KEY")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
     
-    # Gemini AI Configuration
-    GEMINI_API_KEY: str = Field(..., validation_alias="GEMINI_API_KEY")
+    # Hugging Face AI Configuration
+    HUGGINGFACE_API_KEY: str = Field(..., validation_alias="HUGGINGFACE_API_KEY")
+    HUGGINGFACE_API_URL: str = Field("https://router.huggingface.co/v1/chat/completions", validation_alias="HUGGINGFACE_API_URL")
     
     # Database Config (Default to SQLite for local ease, PostgreSQL ready)
     DATABASE_URL: str = Field("sqlite:///./codesage.db", validation_alias="DATABASE_URL")
