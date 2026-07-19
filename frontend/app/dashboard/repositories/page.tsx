@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -11,7 +11,7 @@ import {
 import { formatDate, getLanguageColor, formatNumber, getScoreColor } from '@/lib/utils';
 import { fetchRepos, importRepo, triggerReview, fetchRepoReviews, syncRepos, rescanRepo, fetchScanProgress } from '@/lib/api';
 
-export default function RepositoriesPage() {
+function RepositoriesContent() {
   const searchParams = useSearchParams();
   const [repos, setRepos] = useState<any[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
@@ -553,5 +553,17 @@ export default function RepositoriesPage() {
         </>
       )}
     </div>
+  );
+}
+
+export default function RepositoriesPage() {
+  return (
+    <Suspense fallback={
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
+        <div style={{ width: '40px', height: '40px', border: '3px solid var(--border-primary)', borderTopColor: 'var(--primary-500)', borderRadius: '50%', animation: 'spin-slow 0.8s linear infinite' }} />
+      </div>
+    }>
+      <RepositoriesContent />
+    </Suspense>
   );
 }
